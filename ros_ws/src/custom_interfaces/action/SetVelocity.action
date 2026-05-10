@@ -1,0 +1,18 @@
+# Run a motor at a target velocity for an optional duration.
+# Cancel the goal to stop early.
+
+string  name              # motor name from config
+float64 target_velocity   # rad/s
+float64 duration          # s  — 0 means run until cancelled
+float64 current_limit     # A  — 0 uses the motor's MAX_CURRENT_A default
+float64 acceleration      # rad/s²  — 0 uses the firmware default (20 rad/s²)
+float64 deceleration      # rad/s²  — 0 uses the same value as acceleration
+---
+bool    success
+string  message
+float64 average_velocity  # rad/s — mean over the run
+float64 elapsed_time      # s
+---
+float64 current_velocity  # rad/s
+float64 current_torque    # N·m
+float64 elapsed_time      # s

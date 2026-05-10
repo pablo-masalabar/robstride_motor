@@ -1,0 +1,14 @@
+# Return the list of known parameter function codes and their metadata.
+# Useful for introspection before calling ReadParam / WriteParam.
+#
+# filter: optional substring to match against name or description.
+#         empty string returns all parameters.
+
+string filter
+---
+# Parallel arrays — all have the same length.
+uint16[] codes         # function code  (e.g. 0x7005)
+string[] names         # parameter name (e.g. "run_mode")
+string[] types         # data type      (e.g. "uint8" | "float" | "uint16" | "uint32")
+string[] access        # "R" | "R_W"
+string[] descriptions  # human-readable description

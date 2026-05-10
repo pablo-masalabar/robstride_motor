@@ -1,0 +1,20 @@
+# Change the CAN ID and / or baud rate of a motor.
+#
+# CAN ID change  — takes effect immediately (comm type 7).
+# Baud rate change — written to flash; takes effect after re-power (comm type 23).
+#
+# Set a field to 0 to leave it unchanged.
+# 'all' is supported for can_id only when all motors share the same new ID
+# would conflict — use individual names for CAN ID changes.
+
+string name
+
+uint8  can_id       # new CAN ID (1-127);  0 = keep current
+uint8  baud_flag    # new baud rate flag;  0 = keep current
+                    #   1 = 1 Mbps   (default)
+                    #   2 = 500 Kbps
+                    #   3 = 250 Kbps
+                    #   4 = 125 Kbps
+---
+bool   success
+string message      # describes what changed; notes if re-power is required

@@ -1,0 +1,9 @@
+string name         # motor name from config
+bool   enable       # true = enable (type 3),  false = stop (type 4)
+bool   clear_fault  # when disabling: also clear latched faults
+---
+bool   success
+string message
+float64 position    # rad — position from first feedback frame
+float64 velocity    # rad/s
+float64 torque      # N·m

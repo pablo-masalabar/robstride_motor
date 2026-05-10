@@ -1,0 +1,6 @@
+# Set the motor's current mechanical position as the new zero (comm type 6).
+
+string name
+---
+bool   success
+string message

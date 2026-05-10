@@ -1,0 +1,50 @@
+# RobStride motor configuration
+#
+# [defaults]
+#   Values here are used for any motor that omits the field.
+#   All fields are optional; the values shown below are the fallbacks
+#   if [defaults] itself is missing.
+#
+# Each other top-level section is a named motor instance.
+#   The section name becomes the joint name in ROS2 topics.
+#
+# Required per motor:
+#   type      - Motor model: RS01 | RS02 | RS03 | RS04 | RS05
+#   motor_id  - CAN ID assigned to the motor (0-127)
+#
+# Motors sharing the same (channel, bustype, bitrate) reuse one CANComms bus.
+
+[defaults]
+node_name                  = "motor_node" # ROS2 node name
+use_node_name_as_topic_base = true        # false → topics are published at root namespace
+master_id               = 253          # host CAN ID embedded in outgoing frames (0xFD)
+channel                 = "can0"       # SocketCAN network interface name
+bustype                 = "socketcan"  # python-can bus type
+bitrate                 = 1000000      # CAN baud rate in bps
+rx_timeout              = 0.05         # reply wait time in seconds
+active_report_interval_ms = 10         # motor autonomous push interval (minimum 10 ms)
+update_rate_hz            = 100.0      # feedback publish rate (Hz)
+
+[left_hip]
+type     = "RS04"
+motor_id = 1
+
+[right_hip]
+type     = "RS04"
+motor_id = 2
+
+[left_knee]
+type     = "RS03"
+motor_id = 3
+
+[right_knee]
+type     = "RS03"
+motor_id = 4
+
+[left_ankle]
+type     = "RS02"
+motor_id = 5
+
+[right_ankle]
+type     = "RS02"
+motor_id = 6

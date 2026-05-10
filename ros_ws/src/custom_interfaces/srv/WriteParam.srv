@@ -1,0 +1,11 @@
+# Write a single parameter by its function-code index (comm type 18).
+# The write is volatile (lost on power-off) unless followed by SaveParams.
+# See ParamIndex enum in motor_base.py for index values.
+
+string  name     # motor name
+uint16  index    # parameter function code (e.g. 0x700A = SPD_REF)
+float64 value    # value to write (interpreted as float or uint8 by the driver)
+bool    persist  # if true, call save_params() (comm type 22) after writing
+---
+bool   success
+string message

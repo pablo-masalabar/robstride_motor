@@ -1,0 +1,14 @@
+# Motor must be disabled before changing mode.
+#
+# mode values (RunMode enum):
+#   0 = OPERATION    MIT-style angle+velocity+Kp+Kd+torque_ff  (power-on default)
+#   1 = POSITION_PP  Profile Position with S-curve planning
+#   2 = VELOCITY     Velocity control
+#   3 = CURRENT      Iq current control
+#   5 = POSITION_CSP Cyclic Synchronous Position
+
+string name
+uint8  mode
+---
+bool   success
+string message

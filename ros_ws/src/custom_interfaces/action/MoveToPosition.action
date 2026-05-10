@@ -1,0 +1,16 @@
+# Move a motor to a target position using CSP or PP mode.
+
+string  name              # motor name from config
+float64 target_position   # rad   — absolute target
+float64 speed_limit       # rad/s — maximum speed during motion
+float64 tolerance         # rad   — position error threshold for success
+float64 timeout           # s     — abort if not reached within this time (0 = no timeout)
+---
+bool    success
+string  message
+float64 final_position    # rad   — position when action concluded
+float64 elapsed_time      # s
+---
+float64 current_position  # rad
+float64 position_error    # rad   — remaining error (target - current)
+float64 elapsed_time      # s

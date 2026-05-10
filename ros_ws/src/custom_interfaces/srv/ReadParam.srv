@@ -1,0 +1,9 @@
+# Read a single parameter by its function-code index (comm type 17).
+# See ParamIndex enum in motor_base.py for index values.
+
+string name     # motor name
+uint16 index    # parameter function code (e.g. 0x7019 = MECH_POS)
+---
+bool    success
+string  message
+float64 value   # decoded parameter value (float or uint cast to float)

@@ -1,0 +1,16 @@
+# Read the CAN ID and baud rate currently stored in a motor.
+# 'all' is not supported — each motor may have different values.
+
+string name
+---
+bool   success
+string message
+
+uint8  can_id       # active CAN ID of the motor (0-127)
+
+uint8  baud_flag    # baud rate flag stored in motor firmware:
+                    #   1 = 1 Mbps   (default)
+                    #   2 = 500 Kbps
+                    #   3 = 250 Kbps
+                    #   4 = 125 Kbps
+string baud_rate    # human-readable baud rate string (e.g. "1Mbps")
