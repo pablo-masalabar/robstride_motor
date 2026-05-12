@@ -1,0 +1,69 @@
+{
+  "ros.distro": "jazzy",
+
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+
+  "python.analysis.extraPaths": [
+    "/opt/ros/jazzy/lib/python3.12/site-packages",
+    "${workspaceFolder}/install/lib/python3.12/site-packages"
+  ],
+
+  "python.autoComplete.extraPaths": [
+    "/opt/ros/jazzy/lib/python3.12/site-packages",
+    "${workspaceFolder}/install/lib/python3.12/site-packages"
+  ],
+
+  "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.cStandard": "c11",
+
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/src/**",
+    "${workspaceFolder}/install/**",
+    "/opt/ros/jazzy/include/**"
+  ],
+
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+
+  "cmake.configureOnOpen": false,
+
+  "terminal.integrated.env.linux": {
+    "ROS_DISTRO": "jazzy",
+    "ROS_VERSION": "2",
+    "AMENT_PREFIX_PATH": "${workspaceFolder}/install:/opt/ros/jazzy",
+    "COLCON_PREFIX_PATH": "${workspaceFolder}/install",
+    "PYTHONPATH": "${workspaceFolder}/install/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages",
+    "LD_LIBRARY_PATH": "${workspaceFolder}/install/lib:/opt/ros/jazzy/lib",
+    "PATH": "${workspaceFolder}/install/bin:/opt/ros/jazzy/bin:${env:PATH}"
+  },
+
+  "files.associations": {
+    "*.hpp": "cpp",
+    "*.h": "cpp",
+    "*.cpp": "cpp",
+    "*.c": "c",
+    "*.launch.py": "python",
+    "*.xacro": "xml",
+    "*.urdf": "xml",
+    "*.rviz": "yaml",
+    "*.yaml": "yaml"
+  },
+
+  "editor.formatOnSave": true,
+
+  "python.formatting.provider": "none",
+
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+
+  "[c]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+
+  "xml.format.enabled": true
+}

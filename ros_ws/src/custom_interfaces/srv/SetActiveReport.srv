@@ -1,0 +1,6 @@
+string  name    # motor name from config, or 'all'
+bool    enable  # true = enable, false = disable
+float64 hz      # reporting rate (Hz); 0 = use default from config
+---
+bool    success
+string  message

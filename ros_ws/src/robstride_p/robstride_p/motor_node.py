@@ -18,6 +18,7 @@ Services
   ~/read_param                           custom_interfaces/ReadParam
   ~/write_param                          custom_interfaces/WriteParam
   ~/help                                 custom_interfaces/Help
+  ~/set_active_report                    custom_interfaces/SetActiveReport
 
 Actions
 -------
@@ -32,6 +33,7 @@ Parameters
 """
 
 import importlib
+import os
 import time
 import threading
 from typing import Dict, Optional, Tuple
@@ -47,12 +49,21 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 
-from custom_interfaces.msg import MotorCommand, MotorFault, MotorState
+from custom_interfaces.msg import (
+    CurrentCommand,
+    MotorFault,
+    MotorState,
+    OperationCommand,
+    PositionCSPCommand,
+    PositionPPCommand,
+    VelocityCommand,
+)
 from custom_interfaces.srv import (
     EnableMotor,
     GetCanConfig,
     Help,
     ReadParam,
+    SetActiveReport,
     SetCanConfig,
     SetRunMode,
     SetZeroPosition,
@@ -62,7 +73,7 @@ from custom_interfaces.action import MoveToPosition
 from custom_interfaces.action import SetVelocity as SetVelocityAction
 
 from .comms import CANComms
-from .motor_base import FaultBit, MotorFeedback, ParamIndex, RunMode
+from .motor_base import FaultBit, MotorFeedback, ParamIndex, RunMode, WarnBit
 
 
 # ── Motor class registry ───────────────────────────────────────────────────
@@ -157,24 +168,25 @@ class MotorNode(Node):
 
         self._defaults = config.pop('defaults')
 
-        update_rate     = float(self._defaults['update_rate_hz'])
-        report_interval = int(self._defaults['active_report_interval_ms'])
-        use_node_prefix = bool(self._defaults.get('use_node_name_as_topic_base', True))
-        self._ns        = '~' if use_node_prefix else ''
+        self._update_rate_hz     = float(self._defaults['update_rate_hz'])
+        self._report_interval_ms = int(self._defaults.get('active_report_interval_ms', 10))
+        use_node_prefix          = bool(self._defaults.get('use_node_name_as_topic_base', True))
+        self._ns                 = '~' if use_node_prefix else ''
 
         self.get_logger().info(
-            f'Config loaded from {config_path} ({len(config)} motors) '
-            f'— {update_rate:.0f} Hz, report interval {report_interval} ms'
+            f'Config loaded from {config_path} ({len(config)} motors) — {self._update_rate_hz:.0f} Hz'
         )
 
         # ── State tracking ─────────────────────────────────────────────────
-        self._buses:         Dict[Tuple, CANComms] = {}
-        self._motors:        Dict[str, object]     = {}
-        self._motor_enabled: Dict[str, bool]       = {}
-        self._last_fault:    Dict[str, int]        = {}
-        self._motor_locks:   Dict[str, threading.Lock] = {}
+        self._buses:         Dict[Tuple, CANComms]          = {}
+        self._motors:        Dict[str, object]             = {}
+        self._motor_enabled: Dict[str, bool]               = {}
+        self._motor_mode:    Dict[str, Optional[RunMode]]  = {}
+        self._last_fault:    Dict[str, int]                = {}
+        self._last_warning:  Dict[str, int]                = {}
+        self._motor_locks:   Dict[str, threading.Lock]     = {}
 
-        self._init_motors(config, report_interval)
+        self._init_motors(config)
 
         # ── Publishers ─────────────────────────────────────────────────────
         self._joint_state_pub = self.create_publisher(JointState, self._topic('joint_states'), 10)
@@ -189,16 +201,23 @@ class MotorNode(Node):
                 MotorFault, self._topic(f'motors/{name}/fault'), 10
             )
 
-        # ── Subscribers ────────────────────────────────────────────────────
-        self._cmd_subs: Dict[str, object] = {}
+        # ── Subscribers — one topic per control mode ────────────────────────
+        _mode_subs = [
+            (OperationCommand,   'cmd_operation',    self._on_cmd_operation),
+            (PositionPPCommand,  'cmd_position_pp',  self._on_cmd_position_pp),
+            (VelocityCommand,    'cmd_velocity',     self._on_cmd_velocity),
+            (CurrentCommand,     'cmd_current',      self._on_cmd_current),
+            (PositionCSPCommand, 'cmd_position_csp', self._on_cmd_position_csp),
+        ]
         for name in self._motors:
-            self._cmd_subs[name] = self.create_subscription(
-                MotorCommand,
-                self._topic(f'motors/{name}/command'),
-                lambda msg, n=name: self._on_command(msg, n),
-                10,
-                callback_group=self._cb_group,
-            )
+            for msg_type, suffix, cb in _mode_subs:
+                self.create_subscription(
+                    msg_type,
+                    self._topic(f'motors/{name}/{suffix}'),
+                    lambda msg, n=name, fn=cb: fn(msg, n),
+                    10,
+                    callback_group=self._cb_group,
+                )
 
         # ── Services ───────────────────────────────────────────────────────
         self.create_service(EnableMotor,     self._topic('enable_motor'),      self._srv_enable_motor,      callback_group=self._cb_group)
@@ -211,6 +230,8 @@ class MotorNode(Node):
         self.create_service(Trigger,         self._topic('stop_all'),          self._srv_stop_all,          callback_group=self._cb_group)
         self.create_service(GetCanConfig,    self._topic('get_can_config'),    self._srv_get_can_config,    callback_group=self._cb_group)
         self.create_service(SetCanConfig,    self._topic('set_can_config'),    self._srv_set_can_config,    callback_group=self._cb_group)
+        self.create_service(SetActiveReport, self._topic('set_active_report'), self._srv_set_active_report, callback_group=self._cb_group)
+        self.create_service(Trigger,         self._topic('scan_motors'),        self._srv_scan_motors,        callback_group=self._cb_group)
 
         # ── Action servers ─────────────────────────────────────────────────
         self._move_action = ActionServer(
@@ -234,13 +255,13 @@ class MotorNode(Node):
 
         # ── Timer ──────────────────────────────────────────────────────────
         self._timer = self.create_timer(
-            1.0 / update_rate,
+            1.0 / self._update_rate_hz,
             self._update_cb,
             callback_group=self._cb_group,
         )
 
         self.get_logger().info(
-            f'MotorNode ready — {len(self._motors)} motor(s), {update_rate:.0f} Hz'
+            f'MotorNode ready — {len(self._motors)} motor(s), {self._update_rate_hz:.0f} Hz'
         )
 
     # ── Init helpers ────────────────────────────────────────────────────────
@@ -291,7 +312,7 @@ class MotorNode(Node):
             self._buses[key] = bus
         return self._buses[key]
 
-    def _init_motors(self, config: dict, report_interval_ms: int) -> None:
+    def _init_motors(self, config: dict) -> None:
         for name, cfg in config.items():
             motor_type = cfg.get('type')
             if motor_type not in _MOTOR_CLASS_MAP:
@@ -310,10 +331,11 @@ class MotorNode(Node):
                     comms      = bus,
                     rx_timeout = float(cfg.get('rx_timeout', self._defaults['rx_timeout'])),
                 )
-                motor.enable_active_report(enable=True, interval_ms=report_interval_ms)
                 self._motors[name]        = motor
                 self._motor_enabled[name] = False
-                self._last_fault[name]    = -1
+                self._motor_mode[name]    = None   # unknown until set_run_mode is called
+                self._last_fault[name]    = 0
+                self._last_warning[name]  = 0
                 self._motor_locks[name]   = threading.Lock()
                 self.get_logger().info(
                     f'  [{name}]  type={motor_type}  motor_id={cfg["motor_id"]}  '
@@ -333,7 +355,6 @@ class MotorNode(Node):
         js.header.stamp = now
 
         for name, motor in self._motors.items():
-            motor.spin_once()
             fb = motor.feedback
 
             js.name.append(name)
@@ -344,45 +365,113 @@ class MotorNode(Node):
             self._state_pubs[name].publish(self._build_state_msg(name, fb, now))
 
             if fb.fault != self._last_fault[name]:
+                new_bits     = fb.fault & ~self._last_fault[name]
+                cleared_bits = self._last_fault[name] & ~fb.fault
+                if new_bits:
+                    names = [b.name for b in FaultBit if new_bits & b]
+                    self.get_logger().error(f'[{name}] Fault: {", ".join(names)}')
+                if cleared_bits:
+                    self.get_logger().info(f'[{name}] Fault cleared')
                 self._fault_pubs[name].publish(self._build_fault_msg(name, fb, now))
                 self._last_fault[name] = fb.fault
+
+            if fb.warning != self._last_warning[name]:
+                new_bits     = fb.warning & ~self._last_warning[name]
+                cleared_bits = self._last_warning[name] & ~fb.warning
+                if new_bits:
+                    names = [b.name for b in WarnBit if new_bits & b]
+                    self.get_logger().warning(f'[{name}] Warning: {", ".join(names)}')
+                if cleared_bits:
+                    self.get_logger().info(f'[{name}] Warning cleared')
+                self._last_warning[name] = fb.warning
 
         self._joint_state_pub.publish(js)
 
     # ── Command subscriber ────────────────────────────────────────────────────
 
-    def _on_command(self, msg: MotorCommand, name: str) -> None:
-        motor = self._motors.get(name)
-        if motor is None:
+    def _check_mode(self, name: str, required: RunMode) -> bool:
+        if not self._motor_enabled.get(name, False):
+            self.get_logger().warning(f'[{name}] Motor is not enabled — command may have no effect')
+        current = self._motor_mode.get(name)
+        if current is None:
+            self.get_logger().warning(
+                f'[{name}] Run mode unknown — call set_run_mode before sending commands'
+            )
+            return False
+        if current != required:
+            self.get_logger().error(
+                f'[{name}] Rejected command: motor is in {current.name}, expected {required.name}'
+            )
+            return False
+        return True
+
+    def _on_cmd_operation(self, msg: OperationCommand, name: str) -> None:
+        if not self._check_mode(name, RunMode.OPERATION):
             return
-
-        cmd = msg.command_type.lower()
-
+        motor = self._motors[name]
         with self._motor_locks[name]:
             try:
-                if cmd == 'position':
-                    motor.set_position_csp(msg.value)
-                elif cmd == 'velocity':
-                    motor.set_velocity(msg.value)
-                elif cmd == 'current':
-                    motor.set_current(msg.value)
-                elif cmd == 'torque':
-                    motor.set_torque_limit(msg.value)
-                elif cmd == 'operation':
-                    motor.set_operation_control(
-                        position  = msg.position,
-                        velocity  = msg.velocity,
-                        torque_ff = msg.torque_ff,
-                        kp        = msg.kp,
-                        kd        = msg.kd,
-                    )
-                else:
-                    self.get_logger().warning(
-                        f'[{name}] Unknown command_type: {msg.command_type!r}. '
-                        'Expected: position | velocity | current | torque | operation'
-                    )
+                motor.set_operation_control(
+                    position  = msg.position,
+                    velocity  = msg.velocity,
+                    torque_ff = msg.torque_ff,
+                )
             except Exception as e:
-                self.get_logger().error(f'[{name}] Command error: {e}')
+                self.get_logger().error(f'[{name}] operation command error: {e}')
+
+    def _on_cmd_position_pp(self, msg: PositionPPCommand, name: str) -> None:
+        if not self._check_mode(name, RunMode.POSITION_PP):
+            return
+        motor = self._motors[name]
+        with self._motor_locks[name]:
+            try:
+                motor.set_position_pp(
+                    position_rad        = msg.position,
+                    speed_rad_s         = msg.speed         if msg.speed        > 0.0 else 2.0,
+                    acceleration_rad_s2 = msg.acceleration  if msg.acceleration > 0.0 else 10.0,
+                    deceleration_rad_s2 = msg.deceleration  if msg.deceleration > 0.0 else None,
+                    torque_limit_nm     = msg.torque_limit  if msg.torque_limit > 0.0 else None,
+                )
+            except Exception as e:
+                self.get_logger().error(f'[{name}] position_pp command error: {e}')
+
+    def _on_cmd_velocity(self, msg: VelocityCommand, name: str) -> None:
+        if not self._check_mode(name, RunMode.VELOCITY):
+            return
+        motor = self._motors[name]
+        with self._motor_locks[name]:
+            try:
+                motor.set_velocity(
+                    velocity_rad_s      = msg.velocity,
+                    current_limit_a     = msg.current_limit if msg.current_limit > 0.0 else None,
+                    acceleration_rad_s2 = msg.acceleration  if msg.acceleration  > 0.0 else 20.0,
+                )
+            except Exception as e:
+                self.get_logger().error(f'[{name}] velocity command error: {e}')
+
+    def _on_cmd_current(self, msg: CurrentCommand, name: str) -> None:
+        if not self._check_mode(name, RunMode.CURRENT):
+            return
+        motor = self._motors[name]
+        with self._motor_locks[name]:
+            try:
+                motor.set_current(msg.current)
+            except Exception as e:
+                self.get_logger().error(f'[{name}] current command error: {e}')
+
+    def _on_cmd_position_csp(self, msg: PositionCSPCommand, name: str) -> None:
+        if not self._check_mode(name, RunMode.POSITION_CSP):
+            return
+        motor = self._motors[name]
+        with self._motor_locks[name]:
+            try:
+                motor.set_position_csp(
+                    position_rad      = msg.position,
+                    speed_limit_rad_s = msg.speed_limit    if msg.speed_limit    > 0.0 else 2.0,
+                    current_limit_a   = msg.current_limit  if msg.current_limit  > 0.0 else None,
+                )
+            except Exception as e:
+                self.get_logger().error(f'[{name}] position_csp command error: {e}')
 
     # ── Services ─────────────────────────────────────────────────────────────
 
@@ -452,6 +541,7 @@ class MotorNode(Node):
             try:
                 with self._motor_locks[name]:
                     motor.set_run_mode(mode)
+                self._motor_mode[name] = mode
             except Exception as e:
                 failed.append(f'{name}: {e}')
 
@@ -628,6 +718,65 @@ class MotorNode(Node):
             res.message = ', '.join(changed)
         return res
 
+    def _set_timer_rate(self, hz: float) -> None:
+        self._timer.cancel()
+        self._timer = self.create_timer(
+            1.0 / hz, self._update_cb, callback_group=self._cb_group
+        )
+
+    def _srv_set_active_report(self, req: SetActiveReport.Request, res: SetActiveReport.Response):
+        motors = self._resolve_motors(req.name)
+        if motors is None:
+            res.success = False
+            res.message = f'Motor {req.name!r} not found'
+            return res
+
+        if req.hz > 0.0:
+            interval_ms = max(10, int(1000.0 / req.hz))
+        else:
+            interval_ms = self._report_interval_ms
+
+        failed = []
+        for name, motor in motors.items():
+            try:
+                with self._motor_locks[name]:
+                    motor.enable_active_report(enable=req.enable, interval_ms=interval_ms)
+            except Exception as e:
+                failed.append(f'{name}: {e}')
+
+        if failed:
+            res.success = False
+            res.message = 'Errors — ' + ', '.join(failed)
+        else:
+            if req.enable:
+                publish_hz = 1000.0 / interval_ms
+                self._set_timer_rate(publish_hz)
+                state = f'enabled ({publish_hz:.1f} Hz / {interval_ms} ms)'
+            else:
+                self._set_timer_rate(self._update_rate_hz)
+                state = 'disabled'
+            res.success = True
+            res.message = f'Active reporting {state} for {list(motors)}'
+        return res
+
+    def _srv_scan_motors(self, _req: Trigger.Request, res: Trigger.Response):
+        """Query each configured motor for its MCU device ID and log the results."""
+        lines = []
+        for name, motor in self._motors.items():
+            with self._motor_locks[name]:
+                uid = motor.get_device_id()
+            if uid:
+                uid_hex = uid.hex()
+                self.get_logger().info(f'[{name}] CAN ID {motor.motor_id}  UID {uid_hex}')
+                lines.append(f'{name}: CAN ID {motor.motor_id}  UID {uid_hex}')
+            else:
+                self.get_logger().warning(f'[{name}] CAN ID {motor.motor_id}  no response')
+                lines.append(f'{name}: CAN ID {motor.motor_id}  no response')
+
+        res.success = True
+        res.message = '\n'.join(lines)
+        return res
+
     def _srv_stop_all(self, _req: Trigger.Request, res: Trigger.Response):
         """Immediately disable every motor on the bus (comm type 4)."""
         failed = []
@@ -663,6 +812,7 @@ class MotorNode(Node):
                     motor.disable()
                     self._motor_enabled[name] = False
                     motor.set_run_mode(RunMode.POSITION_CSP)
+                    self._motor_mode[name] = RunMode.POSITION_CSP
                     motor.enable()
                     self._motor_enabled[name] = True
                     motor.set_position_csp(0.0)
@@ -696,6 +846,7 @@ class MotorNode(Node):
 
         with self._motor_locks[req.name]:
             motor.set_run_mode(RunMode.POSITION_CSP)
+            self._motor_mode[req.name] = RunMode.POSITION_CSP
             motor.enable()
             self._motor_enabled[req.name] = True
             motor.set_position_csp(req.target_position, speed_limit_rad_s=speed)
@@ -763,6 +914,7 @@ class MotorNode(Node):
 
         with self._motor_locks[req.name]:
             motor.set_run_mode(RunMode.VELOCITY)
+            self._motor_mode[req.name] = RunMode.VELOCITY
             motor.enable()
             self._motor_enabled[req.name] = True
             motor.set_velocity(req.target_velocity,
@@ -835,32 +987,35 @@ class MotorNode(Node):
         msg.header.stamp = stamp
         msg.name         = name
         msg.fault_code   = fb.fault
+        msg.warning_code = fb.warning
         msg.over_temp      = bool(fb.fault & FaultBit.OVER_TEMP)
         msg.driver_ic      = bool(fb.fault & FaultBit.DRIVER_IC)
         msg.undervoltage   = bool(fb.fault & FaultBit.UNDERVOLTAGE)
         msg.overvoltage    = bool(fb.fault & FaultBit.OVERVOLTAGE)
+        msg.b_phase_oc     = bool(fb.fault & FaultBit.B_PHASE_OC)
         msg.c_phase_oc     = bool(fb.fault & FaultBit.C_PHASE_OC)
         msg.encoder_uncal  = bool(fb.fault & FaultBit.ENCODER_UNCAL)
         msg.hw_id_fault    = bool(fb.fault & FaultBit.HW_ID_FAULT)
         msg.pos_init_fault = bool(fb.fault & FaultBit.POS_INIT_FAULT)
         msg.stall_overload = bool(fb.fault & FaultBit.STALL_OVERLOAD)
         msg.a_phase_oc     = bool(fb.fault & FaultBit.A_PHASE_OC)
+        msg.over_temp_warning = bool(fb.warning & WarnBit.OVER_TEMP_WARN)
         return msg
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 
     def destroy_node(self) -> None:
-        self.get_logger().info('Shutting down — disabling motors …')
+        print('[motor_node] Shutting down — disabling motors …')
         for name, motor in self._motors.items():
             try:
                 motor.disable()
             except Exception as e:
-                self.get_logger().warning(f'Could not disable [{name}]: {e}')
+                print(f'[motor_node] Could not disable [{name}]: {e}')
         for key, bus in self._buses.items():
             try:
                 bus.close()
             except Exception as e:
-                self.get_logger().warning(f'Could not close bus {key}: {e}')
+                print(f'[motor_node] Could not close bus {key}: {e}')
         super().destroy_node()
 
 
@@ -871,7 +1026,7 @@ def main(args=None):
 
     # Read node_name from config.toml before constructing MotorNode, because
     # Node.__init__ requires the name before any parameters can be declared.
-    _tmp = rclpy.create_node('_robstride_cfg_reader')
+    _tmp = rclpy.create_node(f'_robstride_cfg_reader_{os.getpid()}')
     _tmp.declare_parameter('config_path', '')
     config_path = _tmp.get_parameter('config_path').value
     _tmp.destroy_node()
@@ -894,7 +1049,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

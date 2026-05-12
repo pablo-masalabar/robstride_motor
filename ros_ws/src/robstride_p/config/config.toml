@@ -25,26 +25,7 @@ rx_timeout              = 0.05         # reply wait time in seconds
 active_report_interval_ms = 10         # motor autonomous push interval (minimum 10 ms)
 update_rate_hz            = 100.0      # feedback publish rate (Hz)
 
-[left_hip]
-type     = "RS04"
-motor_id = 1
-
-[right_hip]
-type     = "RS04"
-motor_id = 2
-
-[left_knee]
-type     = "RS03"
-motor_id = 3
-
-[right_knee]
-type     = "RS03"
-motor_id = 4
-
-[left_ankle]
+[trial]
 type     = "RS02"
-motor_id = 5
+motor_id = 127
 
-[right_ankle]
-type     = "RS02"
-motor_id = 6

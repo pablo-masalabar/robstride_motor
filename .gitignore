@@ -1,4 +1,6 @@
+
 build/
 install/
 log/
 ros_ws/src/robstride_ros_sample/
+*.pyc

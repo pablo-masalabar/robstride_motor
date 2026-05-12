@@ -1,10 +1,24 @@
 """
 motor_base.py – Shared base class for all RobStride quasi-direct-drive motors.
 
-All RS0x motors (RS01–RS05) run the same private CAN 2.0 protocol
+All RS0x motors (RS01–RS05) use the same private CAN 2.0 protocol
 (extended 29-bit frame, 1 Mbps, section 4 of each motor's user manual).
-This module contains the complete protocol implementation.  Subclasses
-override only the motor-specific physical limits.
+This module contains the complete protocol implementation; subclasses
+override only motor-specific physical limits.
+
+Frame handling
+--------------
+All incoming frames are dispatched through _on_frame_received, which is
+registered as the per-motor callback in CANComms and called by the Notifier
+background thread for every arriving frame:
+
+  type 2  (MOTOR_FEEDBACK)  → decode and replace _feedback
+  type 21 (FAULT_FEEDBACK)  → update _feedback.fault and _feedback.warning
+  type 17 (PARAM_READ reply) → store result, set _param_event
+  type 0  (GET_DEVICE_ID)   → store result, set _device_id_event
+
+motor.feedback is therefore always current without any explicit polling.
+Parameter reads block the caller via threading.Event.wait(rx_timeout).
 
 Shared protocol constants (same for all RS0x motors):
   P_MIN / P_MAX   ±4π rad   position encoding range for operation-control mode
@@ -18,6 +32,7 @@ Motor-specific limits (set as class attributes in each subclass):
 """
 
 import struct
+import threading
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING, Optional
@@ -102,11 +117,12 @@ class ParamIndex(IntEnum):
 
 
 class FaultBit(IntEnum):
-    """Fault bitmask (faultSta, 0x3022; also carried in type-2 feedback ID)."""
+    """Fault bitmask (faultSta, 0x3022; bytes 0-3 of type-21 frame)."""
     OVER_TEMP      = (1 << 0)
     DRIVER_IC      = (1 << 1)
     UNDERVOLTAGE   = (1 << 2)
     OVERVOLTAGE    = (1 << 3)
+    B_PHASE_OC     = (1 << 4)
     C_PHASE_OC     = (1 << 5)
     ENCODER_UNCAL  = (1 << 7)
     HW_ID_FAULT    = (1 << 8)
@@ -115,18 +131,24 @@ class FaultBit(IntEnum):
     A_PHASE_OC     = (1 << 16)
 
 
+class WarnBit(IntEnum):
+    """Warning bitmask (bytes 4-7 of type-21 frame)."""
+    OVER_TEMP_WARN = (1 << 0)   # winding temp approaching 135 °C threshold
+
+
 # ── Data structures ────────────────────────────────────────────────────────
 
 @dataclass
 class MotorFeedback:
-    """Decoded type-2 feedback frame (section 4.1.2)."""
+    """Decoded motor state, updated by type-2 and type-21 frames."""
     motor_id:    int   = 0
     position:    float = 0.0   # rad
     velocity:    float = 0.0   # rad/s
     torque:      float = 0.0   # N·m
     temperature: float = 0.0   # °C
     mode:        int   = 0     # 0=reset, 1=calibration, 2=run
-    fault:       int   = 0     # bitmask – see FaultBit
+    fault:       int   = 0     # bitmask – see FaultBit (type-2 bits 21-16; type-21 bytes 0-3)
+    warning:     int   = 0     # bitmask – see WarnBit  (type-21 bytes 4-7)
 
 
 # ── Base motor class ───────────────────────────────────────────────────────
@@ -160,7 +182,7 @@ class RobStrideMotorBase:
             motor_id:   CAN ID of the motor (0–127).
             master_id:  Host CAN ID embedded in outgoing frames (default 0xFD).
             comms:      CANComms instance to use for transport.
-            rx_timeout: Seconds to wait for a reply frame.
+            rx_timeout: Seconds to wait for a reply frame (param read, device ID).
         """
         if comms is None:
             raise ValueError("comms must be a CANComms instance; create one with CANComms('can0')")
@@ -169,6 +191,15 @@ class RobStrideMotorBase:
         self.rx_timeout = rx_timeout
         self._comms     = comms
         self._feedback  = MotorFeedback(motor_id=motor_id)
+
+        # Per-instance events for request-response comm types (param read, device ID).
+        # Clear the event before sending the request, then wait on it.
+        self._param_result:     Optional[bytes] = None
+        self._param_event                       = threading.Event()
+        self._device_id_result: Optional[bytes] = None
+        self._device_id_event                   = threading.Event()
+        self._feedback_callback                 = None
+
         self._comms.add_motor_filter(motor_id, callback=self._on_frame_received)
 
     # ── Scalar helpers ─────────────────────────────────────────────────────
@@ -199,9 +230,6 @@ class RobStrideMotorBase:
 
     def _send(self, comm_type: int, data_area2: int, payload: bytes) -> None:
         self._comms.send_extended(self._ext_id(comm_type, data_area2), payload)
-
-    def _recv(self) -> Optional["can.Message"]:
-        return self._comms.recv_for_motor(self.motor_id, timeout=self.rx_timeout)
 
     # ── Feedback frame parser ──────────────────────────────────────────────
 
@@ -239,29 +267,62 @@ class RobStrideMotorBase:
 
     def _on_frame_received(self, msg: "can.Message") -> None:
         """
-        Invoked by CANComms._MotorDispatcher on every frame arrival for this motor.
-
-        Updates _feedback immediately so the instance state is always current,
-        regardless of whether the caller is polling or using active reporting.
-        Only type-2 feedback frames carry motor-state data.
+        Unified frame handler — called by _MotorDispatcher in the Notifier thread
+        for every incoming frame addressed to this motor.  Dispatches on comm type
+        and updates state immediately; no queues involved.
         """
         if not msg.is_extended_id:
             return
-        if (msg.arbitration_id >> 24) & 0x1F == CommType.MOTOR_FEEDBACK:
+        comm_type = (msg.arbitration_id >> 24) & 0x1F
+        if comm_type == CommType.MOTOR_FEEDBACK:
             self._feedback = self._parse_type2(msg)
-
-    def _read_feedback(self) -> MotorFeedback:
-        msg = self._recv()
-        if msg:
-            self._feedback = self._parse_type2(msg)
-        return self._feedback
+            if self._feedback_callback:
+                self._feedback_callback(self._feedback)
+        elif comm_type == CommType.ACTIVE_REPORT:
+            # Same ID layout as type-2 (mode bits 23-22, fault bits 21-16).
+            # Data bytes 0-3: position and velocity (same encoding as type-2).
+            # Data bytes 4-7: Kp/Kd — ignored.
+            eid = msg.arbitration_id
+            d   = msg.data
+            raw_pos = (d[0] << 8) | d[1]
+            raw_vel = (d[2] << 8) | d[3]
+            self._feedback.position = self._uint_to_float(raw_pos, P_MIN,      P_MAX,      16)
+            self._feedback.velocity = self._uint_to_float(raw_vel, self.V_MIN, self.V_MAX, 16)
+            self._feedback.fault    = (eid >> 16) & 0x3F
+            self._feedback.mode     = (eid >> 22) & 0x03
+            if self._feedback_callback:
+                self._feedback_callback(self._feedback)
+        elif comm_type == CommType.FAULT_FEEDBACK:
+            if len(msg.data) >= 8:
+                self._feedback.fault   = struct.unpack_from('<I', msg.data, 0)[0]
+                self._feedback.warning = struct.unpack_from('<I', msg.data, 4)[0]
+        elif comm_type == CommType.ACTIVE_REPORT:
+            # Same ID layout as type-2 (mode bits 23-22, fault bits 21-16).
+            # Data bytes 0-3: position and velocity (same encoding as type-2).
+            # Data bytes 4-7: Kp/Kd — not needed, ignored.
+            eid = msg.arbitration_id
+            d   = msg.data
+            raw_pos = (d[0] << 8) | d[1]
+            raw_vel = (d[2] << 8) | d[3]
+            self._feedback.position = self._uint_to_float(raw_pos, P_MIN,      P_MAX,      16)
+            self._feedback.velocity = self._uint_to_float(raw_vel, self.V_MIN, self.V_MAX, 16)
+            self._feedback.fault    = (eid >> 16) & 0x3F
+            self._feedback.mode     = (eid >> 22) & 0x03
+        elif comm_type == CommType.PARAM_READ:
+            if len(msg.data) >= 8:
+                self._param_result = bytes(msg.data[4:8])
+                self._param_event.set()
+        elif comm_type == CommType.GET_DEVICE_ID:
+            if len(msg.data) >= 8:
+                self._device_id_result = bytes(msg.data)
+                self._device_id_event.set()
 
     # ── Core motor commands ────────────────────────────────────────────────
 
     def enable(self) -> MotorFeedback:
         """Type 3 – enable motor (enter run state)."""
         self._send(CommType.MOTOR_ENABLE, self.master_id, bytes(8))
-        return self._read_feedback()
+        return self._feedback
 
     def disable(self, clear_fault: bool = False) -> MotorFeedback:
         """
@@ -274,7 +335,7 @@ class RobStrideMotorBase:
         if clear_fault:
             payload[0] = 0x01
         self._send(CommType.MOTOR_STOP, self.master_id, bytes(payload))
-        return self._read_feedback()
+        return self._feedback
 
     def set_operation_control(
         self,
@@ -309,14 +370,14 @@ class RobStrideMotorBase:
             (raw_kd  >> 8) & 0xFF,  raw_kd  & 0xFF,
         ])
         self._send(CommType.OPERATION_CTRL, raw_tor, payload)
-        return self._read_feedback()
+        return self._feedback
 
     def set_zero_position(self) -> MotorFeedback:
         """Type 6 – set current mechanical position as zero."""
         payload = bytearray(8)
         payload[0] = 0x01
         self._send(CommType.SET_MECH_ZERO, self.master_id, bytes(payload))
-        return self._read_feedback()
+        return self._feedback
 
     def set_can_id(self, new_id: int) -> None:
         """Type 7 – change motor CAN ID (effective immediately, no reply)."""
@@ -326,9 +387,11 @@ class RobStrideMotorBase:
 
     def get_device_id(self) -> Optional[bytes]:
         """Type 0 – request 64-bit MCU unique identifier. Returns 8 raw bytes."""
+        self._device_id_event.clear()
         self._send(CommType.GET_DEVICE_ID, self.master_id, bytes(8))
-        msg = self._recv()
-        return bytes(msg.data) if msg else None
+        if self._device_id_event.wait(timeout=self.rx_timeout):
+            return self._device_id_result
+        return None
 
     # ── Parameter read_write (Types 17 & 18) ──────────────────────────────
 
@@ -350,9 +413,11 @@ class RobStrideMotorBase:
         """Type 17 – read a parameter; returns the raw 4-byte data field."""
         payload = bytearray(8)
         struct.pack_into('<H', payload, 0, index & 0xFFFF)
+        self._param_event.clear()
         self._send(CommType.PARAM_READ, self.master_id, bytes(payload))
-        msg = self._recv()
-        return bytes(msg.data[4:8]) if msg else None
+        if self._param_event.wait(timeout=self.rx_timeout):
+            return self._param_result
+        return None
 
     def read_param_float(self, index: int) -> Optional[float]:
         """Type 17 – read a float parameter."""
@@ -473,22 +538,6 @@ class RobStrideMotorBase:
 
     # ── Telemetry ──────────────────────────────────────────────────────────
 
-    def spin_once(self) -> Optional[MotorFeedback]:
-        """
-        Non-blocking poll: return decoded feedback if a frame for this motor
-        is already queued, else None.  Never blocks.
-        """
-        msg = self._comms.recv_for_motor(self.motor_id, timeout=0)
-        if msg and msg.is_extended_id:
-            if (msg.arbitration_id >> 24) & 0x1F == CommType.MOTOR_FEEDBACK:
-                self._feedback = self._parse_type2(msg)
-                return self._feedback
-        return None
-
-    def read_status(self) -> MotorFeedback:
-        """Blocking poll: wait up to rx_timeout for a feedback frame."""
-        return self._read_feedback()
-
     def read_mech_pos(self) -> Optional[float]:
         """Read mechanical position via parameter read (rad)."""
         return self.read_param_float(ParamIndex.MECH_POS)
@@ -501,7 +550,11 @@ class RobStrideMotorBase:
         """Read bus voltage (V)."""
         return self.read_param_float(ParamIndex.VBUS)
 
+    def set_feedback_callback(self, callback) -> None:
+        """Register a callable invoked with the latest MotorFeedback on every feedback frame."""
+        self._feedback_callback = callback
+
     @property
     def feedback(self) -> MotorFeedback:
-        """Last decoded motor feedback (may be stale if not polling)."""
+        """Current motor state — kept up-to-date by the Notifier callback."""
         return self._feedback
