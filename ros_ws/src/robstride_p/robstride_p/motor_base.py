@@ -296,18 +296,6 @@ class RobStrideMotorBase:
             if len(msg.data) >= 8:
                 self._feedback.fault   = struct.unpack_from('<I', msg.data, 0)[0]
                 self._feedback.warning = struct.unpack_from('<I', msg.data, 4)[0]
-        elif comm_type == CommType.ACTIVE_REPORT:
-            # Same ID layout as type-2 (mode bits 23-22, fault bits 21-16).
-            # Data bytes 0-3: position and velocity (same encoding as type-2).
-            # Data bytes 4-7: Kp/Kd — not needed, ignored.
-            eid = msg.arbitration_id
-            d   = msg.data
-            raw_pos = (d[0] << 8) | d[1]
-            raw_vel = (d[2] << 8) | d[3]
-            self._feedback.position = self._uint_to_float(raw_pos, P_MIN,      P_MAX,      16)
-            self._feedback.velocity = self._uint_to_float(raw_vel, self.V_MIN, self.V_MAX, 16)
-            self._feedback.fault    = (eid >> 16) & 0x3F
-            self._feedback.mode     = (eid >> 22) & 0x03
         elif comm_type == CommType.PARAM_READ:
             if len(msg.data) >= 8:
                 self._param_result = bytes(msg.data[4:8])

@@ -24,8 +24,67 @@ bitrate                 = 1000000      # CAN baud rate in bps
 rx_timeout              = 0.05         # reply wait time in seconds
 active_report_interval_ms = 10         # motor autonomous push interval (minimum 10 ms)
 update_rate_hz            = 100.0      # feedback publish rate (Hz)
+# operation_mode: mode applied to every motor at startup (can be overridden per motor)
+#   OPERATION    – MIT-style angle+velocity+Kp+Kd+torque_ff  (firmware default)
+#   POSITION_PP  – Profile Position with S-curve planning
+#   VELOCITY     – Velocity control
+#   CURRENT      – Iq current control
+#   POSITION_CSP – Cyclic Synchronous Position
+operation_mode            = "OPERATION"
 
 [trial]
 type     = "RS02"
 motor_id = 127
+# operation_mode  = "VELOCITY"  # override default operation_mode for this motor
+#
+# Per-motor limits and gains (all optional):
+#
+#   OPERATION mode frame gains (MIT-style PD, sent per-command):
+#     kp              – position error gain  (Kp in: t = Kp*(p_err) + Kd*(v_err) + t_ff)
+#     kd              – velocity error gain  (Kd in the same equation)
+#
+#   Control loop gains written to firmware at startup:
+#     loc_kp          – position loop Kp      (0x701E, used in POSITION_PP / POSITION_CSP)
+#     spd_kp          – speed loop Kp         (0x701F, used in VELOCITY / POSITION_PP / POSITION_CSP)
+#     spd_ki          – speed loop Ki         (0x7020, used in VELOCITY / POSITION_PP / POSITION_CSP)
+#     cur_kp          – current loop Kp       (0x7010, used in all modes)
+#     cur_ki          – current loop Ki       (0x7011, used in all modes)
+#
+#   Position homing offset:
+#     motor_homing_pos – reference position in motor frame (rad).
+#                        Published state:  user_pos  = motor_pos − motor_homing_pos
+#                        Commands sent:    motor_pos = user_pos  + motor_homing_pos
+#                        Joint limits are evaluated in user frame.
+#                        The homing service moves the motor to motor_homing_pos (user frame 0).
+#
+#   Torque and current limits (written to firmware at startup; also enforced in software):
+#     max_torque      – peak torque cap (N·m); written to LIMIT_TORQUE (0x700B)
+#                       clamps torque_ff in OPERATION mode and torque_limit in POSITION_PP
+#     max_current     – peak current cap (A); written to LIMIT_CUR (0x7018)
+#                       clamps current_limit in VELOCITY / POSITION_CSP and iq_ref in CURRENT mode
+#
+#   Motion limits (evaluated in user frame):
+#     joint_limit_min – minimum allowed position (rad); commands rejected in position modes,
+#                       motor disabled in velocity mode if exceeded
+#     joint_limit_max – maximum allowed position (rad); same enforcement as joint_limit_min
+#     max_vel         – velocity cap applied to all mode commands (rad/s)
+#     max_accel       – acceleration cap applied to velocity / position-PP commands (rad/s²)
+#     max_decel       – deceleration cap applied to position-PP commands (rad/s²)
+#
+# Example:
+# motor_homing_pos = 1.5708   # motor's 90° position becomes user frame 0
+# max_torque      = 10.0
+# max_current     = 8.0
+# kp              = 10.0
+# kd              = 1.0
+# loc_kp          = 40.0
+# spd_kp          = 6.0
+# spd_ki          = 0.02
+# cur_kp          = 0.125
+# cur_ki          = 0.0158
+# joint_limit_min = -3.14
+# joint_limit_max =  3.14
+# max_vel         = 5.0
+# max_accel       = 10.0
+# max_decel       = 10.0
 

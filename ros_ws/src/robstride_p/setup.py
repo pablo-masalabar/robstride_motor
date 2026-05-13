@@ -1,3 +1,4 @@
+import glob
 from setuptools import find_packages, setup
 
 package_name = 'robstride_p'
@@ -9,8 +10,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/robstride_p']),
         ('share/robstride_p',              ['package.xml']),
-        ('share/robstride_p/launch',       ['launch/motors.launch.py']),
-        ('share/robstride_p/config',       ['config/config.toml']),
+        ('share/robstride_p/launch',       glob.glob('launch/*')),
+        ('share/robstride_p/config',       glob.glob('config/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

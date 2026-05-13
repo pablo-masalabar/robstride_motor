@@ -1,0 +1,64 @@
+# mimic node configuration
+
+# Control mode applied to target motors at startup (csp | pp)
+mode = "pp"
+
+# Debug mode: when true, commands are published to ~/debug/motors/{name}/cmd_*
+# instead of the real target topics. No commands reach the motors.
+debug = false
+
+# Active reporting rate for source motors (Hz)
+active_report_hz = 60.0
+
+# ROS 2 node name prefixes used to reach source / target motor node services
+source_node_prefix = "/left_arm"
+target_node_prefix = "/right_arm"
+
+# Topic to subscribe to for source motor joint states
+source_joint_states_topic = "/left_arm/joint_states"
+
+# Topic patterns for target motor commands.
+# {name} is replaced with the target motor name from motor_map.
+target_csp_topic_pattern = "/right_arm/motors/{name}/cmd_position_csp"
+target_pp_topic_pattern  = "/right_arm/motors/{name}/cmd_position_pp"
+
+# Motors whose state is subscribed to (commands are read from these)
+source_motors = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
+
+# Motors that commands are forwarded to
+target_motors = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
+
+# Mapping: source motor → target motor
+# Every source_motor must appear here; every value must be in target_motors
+[motor_map]
+SpL = "SpR"
+SrL = "SrR"
+SwL = "SwR"
+EpL = "EpR"
+WwL = "WwR"
+WpL = "WpR"
+WrL = "WrR"
+
+# Default motion parameters applied to every command published by the node.
+# All fields are optional; 0 means use the motor node / firmware default.
+
+[pp_defaults]
+speed        = 25.0    # rad/s  — max speed during motion
+acceleration = 30.0   # rad/s² — acceleration ramp
+deceleration = 30.0   # rad/s² — deceleration ramp (0 = same as acceleration)
+torque_limit = 15.0    # N·m   — 0 = motor T_MAX
+
+[csp_defaults]
+speed_limit   = 10.0   # rad/s — speed limit
+current_limit = 20.0   # A    — 0 = motor MAX_CURRENT_A
+
+# Mapping: source motor → transform function name from mimic/transforms.py
+# If a source motor is omitted the position is forwarded unchanged (passthrough)
+[transform_map]
+SpL = "negate"
+SrL = "negate"
+SwL = "subtract_from_2pi"
+EpL = "negate"
+WwL = "subtract_from_2pi"
+WpL = "subtract_from_2pi"
+WrL = "passthrough"

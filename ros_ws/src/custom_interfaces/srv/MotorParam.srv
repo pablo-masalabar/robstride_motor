@@ -1,0 +1,26 @@
+# Read or write a per-motor software/firmware parameter at runtime.
+#
+# Software-only params (stored in node, not written to motor):
+#   kp              – OPERATION mode frame Kp (position error gain)
+#   kd              – OPERATION mode frame Kd (velocity error gain)
+#   joint_limit_min – minimum allowed position (rad)
+#   joint_limit_max – maximum allowed position (rad)
+#   max_vel         – velocity cap for all mode commands (rad/s)
+#   max_accel       – acceleration cap (rad/s²)
+#   max_decel       – deceleration cap (rad/s²)
+#
+# Firmware params (written to motor when set=true):
+#   loc_kp          – position loop Kp  (0x701E)
+#   spd_kp          – speed loop Kp     (0x701F)
+#   spd_ki          – speed loop Ki     (0x7020)
+#   cur_kp          – current loop Kp   (0x7010)
+#   cur_ki          – current loop Ki   (0x7011)
+
+string  name    # motor name from config
+string  param   # parameter name (see above)
+bool    set     # true = write value, false = read current value
+float64 value   # value to write (ignored when set=false)
+---
+bool    success
+string  message
+float64 value   # current value; NaN if param has not been set

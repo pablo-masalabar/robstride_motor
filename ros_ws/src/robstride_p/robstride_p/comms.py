@@ -33,6 +33,30 @@ import can
 from can import BusState
 
 
+class _SafeNotifier(can.Notifier):
+    """
+    can.Notifier subclass that catches bus-level exceptions in the receive
+    thread and routes them to a caller-supplied handler instead of letting
+    them propagate as an unformatted traceback.
+
+    Works with all python-can versions regardless of whether Notifier itself
+    supports an ``on_error`` kwarg.
+    """
+
+    def __init__(self, bus, listeners, error_handler=None, **kwargs):
+        self._error_handler = error_handler
+        super().__init__(bus, listeners, **kwargs)
+
+    def _rx_thread(self, bus):
+        try:
+            super()._rx_thread(bus)
+        except Exception as exc:
+            if self._error_handler is not None:
+                self._error_handler(exc)
+            else:
+                print(f'[CANComms] Bus error on {bus.channel_info}: {exc}', flush=True)
+
+
 class _MotorDispatcher(can.Listener):
     """
     Routes every valid incoming CAN frame to the registered per-motor callback.
@@ -92,6 +116,7 @@ class CANComms:
         bustype:    str   = "socketcan",
         bitrate:    int   = 1_000_000,
         rx_timeout: float = 0.05,
+        on_error:   Optional[Callable[[Exception], None]] = None,
     ):
         """
         Args:
@@ -100,8 +125,12 @@ class CANComms:
             bitrate:    Baud rate in bps. RS0x motors default to 1 Mbps.
             rx_timeout: Timeout (seconds) used by motor instances when waiting
                         for a response frame via threading.Event.
+            on_error:   Optional callback invoked when the Notifier thread catches
+                        a bus exception (e.g. network down).  Receives the exception;
+                        return value is ignored — the thread always stops cleanly.
         """
-        self.rx_timeout = rx_timeout
+        self.rx_timeout     = rx_timeout
+        self._error_callback = on_error
         self._bus       = can.interface.Bus(
             channel=channel,
             bustype=bustype,
@@ -160,9 +189,19 @@ class CANComms:
 
     # ── Background listener ────────────────────────────────────────────────────
 
+    def _on_notifier_error(self, exc: Exception) -> None:
+        """Forwarded from _SafeNotifier when the receive thread catches an exception."""
+        if self._error_callback is not None:
+            self._error_callback(exc)
+        else:
+            print(
+                f'[CANComms] Bus error on {self._bus.channel_info}: {exc}',
+                flush=True,
+            )
+
     def start_listener(self, extra_listeners: Optional[List[can.Listener]] = None) -> None:
         """
-        Start a ``can.Notifier`` background thread that feeds ``_MotorDispatcher``.
+        Start a ``_SafeNotifier`` background thread that feeds ``_MotorDispatcher``.
 
         Must be called before any motor is used.  All frame handling happens
         inside the per-motor callbacks invoked by the Notifier thread.
@@ -174,7 +213,9 @@ class CANComms:
         if self._notifier is not None:
             return
         all_listeners  = [self._dispatcher] + (extra_listeners or [])
-        self._notifier = can.Notifier(self._bus, all_listeners)
+        self._notifier = _SafeNotifier(
+            self._bus, all_listeners, error_handler=self._on_notifier_error
+        )
 
     def stop_listener(self) -> None:
         """Stop the Notifier thread; no further callbacks will fire."""

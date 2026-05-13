@@ -9,6 +9,7 @@
 
 string name
 uint8  mode
+bool   automatic_enable_disable  # if true: disable → change mode → re-enable automatically
 ---
 bool   success
 string message

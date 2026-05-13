@@ -1,0 +1,14 @@
+string  mode           # pp | csp — which set of params to update
+
+# PP mode parameters (ignored when mode = csp)
+float64 speed          # rad/s  — max speed during motion   (0 = keep current)
+float64 acceleration   # rad/s² — acceleration ramp          (0 = keep current)
+float64 deceleration   # rad/s² — deceleration ramp          (0 = keep current)
+float64 torque_limit   # N·m   — 0 = keep current
+
+# CSP mode parameters (ignored when mode = pp)
+float64 speed_limit    # rad/s — speed limit   (0 = keep current)
+float64 current_limit  # A    — current limit  (0 = keep current)
+---
+bool    success
+string  message

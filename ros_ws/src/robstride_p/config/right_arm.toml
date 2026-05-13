@@ -1,0 +1,35 @@
+# RightArm RobStride motor configuration
+
+[defaults]
+node_name                  = "right_arm" # ROS2 node name
+use_node_name_as_topic_base = true        # false → topics are published at root namespace
+master_id               = 253          # host CAN ID embedded in outgoing frames (0xFD)
+channel                 = "can0"       # SocketCAN network interface name
+bustype                 = "socketcan"  # python-can bus type
+bitrate                 = 1000000      # CAN baud rate in bps
+rx_timeout              = 0.05         # reply wait time in seconds
+active_report_interval_ms = 10         # motor autonomous push interval (minimum 10 ms)
+update_rate_hz            = 30.0      # feedback publish rate (Hz)
+operation_mode            = "OPERATION"
+
+[SpR]
+type = "RS04"
+motor_id = 16
+[SrR]
+type = "RS04"
+motor_id = 17
+[SwR]
+type = "RS03"
+motor_id = 18
+[EpR]
+type = "RS03"
+motor_id = 19
+[WwR]
+type = "RS02"
+motor_id = 20
+[WpR]
+type = "RS02"
+motor_id = 21
+[WrR]
+type = "RS02"
+motor_id = 22

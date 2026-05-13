@@ -1,0 +1,6 @@
+string[] names   # target motor names to enable/disable; use ['all'] for all motors
+bool     enable  # true = enable, false = disable
+bool     clear_fault
+---
+bool   success
+string message

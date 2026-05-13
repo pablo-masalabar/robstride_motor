@@ -26,6 +26,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetCanConfig.srv"
   "srv/SetCanConfig.srv"
   "srv/SetActiveReport.srv"
+  "srv/MotorParam.srv"
+  "srv/SetMimicMode.srv"
+  "srv/SetMimicParams.srv"
+  "srv/EnableMimicMotors.srv"
   # Actions
   "action/MoveToPosition.action"
   "action/SetVelocity.action"
