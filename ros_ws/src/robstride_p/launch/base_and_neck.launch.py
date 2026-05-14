@@ -17,7 +17,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('robstride_p')
 
-    default_config = os.path.join(pkg_share, 'config', 'right_arm.toml')
+    default_config = os.path.join(pkg_share, 'config', 'base_and_neck.toml')
 
     config_arg = DeclareLaunchArgument(
         'config',
@@ -28,7 +28,7 @@ def generate_launch_description():
     motor_node = Node(
         package='robstride_p',
         executable='motor_node',
-        name='right_arm',
+        name='base_and_neck',
         output='screen',
         parameters=[{'config_path': LaunchConfiguration('config')}],
     )

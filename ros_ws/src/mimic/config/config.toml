@@ -10,12 +10,18 @@ debug = false
 # Active reporting rate for source motors (Hz)
 active_report_hz = 60.0
 
+# Output command rate (Hz). When set, commands are published by a timer at this
+# rate using the latest received motor position. When absent or 0, commands are
+# forwarded immediately on every incoming state message.
+# op_hz = 30.0
+
 # ROS 2 node name prefixes used to reach source / target motor node services
 source_node_prefix = "/left_arm"
 target_node_prefix = "/right_arm"
 
-# Topic to subscribe to for source motor joint states
-source_joint_states_topic = "/left_arm/joint_states"
+# Topic pattern for individual source motor state.
+# {name} is replaced with each source motor name.
+source_motor_state_topic_pattern = "/left_arm/motors/{name}/state"
 
 # Topic patterns for target motor commands.
 # {name} is replaced with the target motor name from motor_map.

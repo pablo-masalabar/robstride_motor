@@ -1,0 +1,24 @@
+services:
+  anuj_exp:
+    image: anuj_exp
+    container_name: anuj_exp
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    network_mode: host
+    privileged: true
+    runtime: nvidia
+    volumes:
+      - /dev:/dev
+      - /dev/shm:/dev/shm
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${HOME}/.Xauthority:${HOME}/.Xauthority:rw
+      - /run/dbus:/run/dbus
+      - /home/feather/neuralzome_ws/anuj:/home/${USER_NAME:-neuralpilot}/anuj
+    environment:
+      - ROS_DOMAIN_ID=0
+      - DISPLAY=${DISPLAY:-:0}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    stdin_open: true
+    tty: true

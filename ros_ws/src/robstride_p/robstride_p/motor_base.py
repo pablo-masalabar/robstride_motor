@@ -279,17 +279,19 @@ class RobStrideMotorBase:
             if self._feedback_callback:
                 self._feedback_callback(self._feedback)
         elif comm_type == CommType.ACTIVE_REPORT:
-            # Same ID layout as type-2 (mode bits 23-22, fault bits 21-16).
-            # Data bytes 0-3: position and velocity (same encoding as type-2).
-            # Data bytes 4-7: Kp/Kd — ignored.
-            eid = msg.arbitration_id
-            d   = msg.data
-            raw_pos = (d[0] << 8) | d[1]
-            raw_vel = (d[2] << 8) | d[3]
-            self._feedback.position = self._uint_to_float(raw_pos, P_MIN,      P_MAX,      16)
-            self._feedback.velocity = self._uint_to_float(raw_vel, self.V_MIN, self.V_MAX, 16)
-            self._feedback.fault    = (eid >> 16) & 0x3F
-            self._feedback.mode     = (eid >> 22) & 0x03
+            # Frame layout identical to type-2: same ID bits, same 8-byte data.
+            eid      = msg.arbitration_id
+            d        = msg.data
+            raw_pos  = (d[0] << 8) | d[1]
+            raw_vel  = (d[2] << 8) | d[3]
+            raw_tor  = (d[4] << 8) | d[5]
+            raw_temp = (d[6] << 8) | d[7]
+            self._feedback.position    = self._uint_to_float(raw_pos, P_MIN,      P_MAX,      16)
+            self._feedback.velocity    = self._uint_to_float(raw_vel, self.V_MIN, self.V_MAX, 16)
+            self._feedback.torque      = self._uint_to_float(raw_tor, self.T_MIN, self.T_MAX, 16)
+            self._feedback.temperature = raw_temp / 10.0
+            self._feedback.fault       = (eid >> 16) & 0x3F
+            self._feedback.mode        = (eid >> 22) & 0x03
             if self._feedback_callback:
                 self._feedback_callback(self._feedback)
         elif comm_type == CommType.FAULT_FEEDBACK:

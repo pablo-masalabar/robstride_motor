@@ -1,10 +1,10 @@
 # LeftArm RobStride motor configuration
 
 [defaults]
-node_name                  = "left_arm" # ROS2 node name
+node_name                  = "base_and_neck" # ROS2 node name
 use_node_name_as_topic_base = true        # false → topics are published at root namespace
 master_id               = 253          # host CAN ID embedded in outgoing frames (0xFD)
-channel                 = "can1"       # SocketCAN network interface name
+channel                 = "can2"       # SocketCAN network interface name
 bustype                 = "socketcan"  # python-can bus type
 bitrate                 = 1000000      # CAN baud rate in bps
 rx_timeout              = 0.05         # reply wait time in seconds
@@ -12,24 +12,28 @@ active_report_interval_ms = 10         # motor autonomous push interval (minimum
 update_rate_hz            = 30.0      # feedback publish rate (Hz)
 operation_mode            = "OPERATION"
 
-[SpL]
-type = "RS04"
-motor_id = 32
-[SrL]
-type = "RS04"
-motor_id = 33
-[SwL]
-type = "RS03"
-motor_id = 34
-[EpL]
-type = "RS03"
-motor_id = 35
-[WwL]
+[BwC]
 type = "RS02"
-motor_id = 36
-[WpL]
+motor_id = 112
+[BwR]
 type = "RS02"
-motor_id = 37
-[WrL]
+motor_id = 113
+[BwL]
 type = "RS02"
-motor_id = 38
+motor_id = 114
+[BpC]
+type = "RS01"
+motor_id = 115
+[BpR]
+type = "RS01"
+motor_id = 116
+[BpL]
+type = "RS01"
+motor_id = 117
+[NpC]
+type = "RS05"
+motor_id = 48
+[NwC]
+type = "RS05"
+motor_id = 49
+

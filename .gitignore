@@ -3,6 +3,7 @@ build/
 install/
 log/
 ros_ws/src/robstride_ros_sample/
+*.tmp
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

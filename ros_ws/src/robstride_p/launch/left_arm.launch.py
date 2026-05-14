@@ -22,7 +22,7 @@ def generate_launch_description():
     config_arg = DeclareLaunchArgument(
         'config',
         default_value=default_config,
-        description='Absolute path to the motor config.toml file',
+        description='Absolute path to the motor config file',
     )
 
     motor_node = Node(

@@ -7,8 +7,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
-from sensor_msgs.msg import JointState
-from custom_interfaces.msg import PositionCSPCommand, PositionPPCommand
+from custom_interfaces.msg import MotorState, PositionCSPCommand, PositionPPCommand
 from mimic import transforms as _transforms
 from custom_interfaces.srv import (
     EnableMimicMotors,
@@ -61,8 +60,12 @@ class MimicNode(Node):
         }
         self._mode:             str            = cfg.get('mode', 'csp').lower()
         self._active_report_hz: float          = float(cfg.get('active_report_hz', 30.0))
+        self._op_hz:            float          = float(cfg.get('op_hz', 0.0))
         self._source_prefix:    str            = cfg.get('source_node_prefix', '')
         self._target_prefix:    str            = cfg.get('target_node_prefix', '')
+
+        # Latest transformed position per source motor; populated by _on_motor_state
+        self._latest_pos: Dict[str, float] = {}
 
         if self._mode not in _VALID_MODES:
             raise RuntimeError(f'Invalid mode {self._mode!r}. Valid: {sorted(_VALID_MODES)}')
@@ -92,13 +95,17 @@ class MimicNode(Node):
                 self._topic(f'mimic/debug/motors/{target}/cmd_position_pp'), qos,
             )
 
-        self.create_subscription(
-            JointState,
-            cfg['source_joint_states_topic'],
-            self._on_joint_states,
-            qos,
-            callback_group=self._cb_subs,
-        )
+        state_topic_pattern = cfg['source_motor_state_topic_pattern']
+        self._state_subs: Dict[str, object] = {}
+        for source in self._motor_map:
+            topic = state_topic_pattern.format(name=source)
+            self._state_subs[source] = self.create_subscription(
+                MotorState,
+                topic,
+                lambda msg, s=source: self._on_motor_state(s, msg),
+                qos,
+                callback_group=self._cb_subs,
+            )
 
         self._active_report_client = self.create_client(
             SetActiveReport,
@@ -145,9 +152,15 @@ class MimicNode(Node):
             1.0, self._setup_once, callback_group=self._cb_setup
         )
 
+        if self._op_hz > 0.0:
+            self.create_timer(
+                1.0 / self._op_hz, self._publish_latest, callback_group=self._cb_subs
+            )
+
         self.get_logger().info(
             f'MimicNode ready — {len(self._motor_map)} motor(s), '
-            f'mode={self._mode}, active_report_hz={self._active_report_hz}'
+            f'mode={self._mode}, active_report_hz={self._active_report_hz}, '
+            f'op_hz={"timer@" + str(self._op_hz) if self._op_hz > 0.0 else "passthrough"}'
             + (' [DEBUG MODE — commands go to ~/mimic/debug/… topics]' if self._debug else '')
         )
 
@@ -313,42 +326,47 @@ class MimicNode(Node):
 
         return res
 
-    # ── Joint states callback ─────────────────────────────────────────────────
+    # ── Motor state callback ──────────────────────────────────────────────────
 
-    def _on_joint_states(self, msg: JointState) -> None:
+    def _on_motor_state(self, source: str, msg: MotorState) -> None:
         if not self._ready:
             return
-        name_to_idx = {n: i for i, n in enumerate(msg.name)}
 
-        for source, target in self._motor_map.items():
-            idx = name_to_idx.get(source)
-            if idx is None:
-                continue
+        self._latest_pos[source] = self._transforms[source](msg.position)
 
-            if idx >= len(msg.position):
-                continue
+        if self._op_hz <= 0.0:
+            self._publish_for(source)
 
-            position = self._transforms[source](msg.position[idx])
+    def _publish_latest(self) -> None:
+        if not self._ready:
+            return
+        for source in self._motor_map:
+            if source in self._latest_pos:
+                self._publish_for(source)
 
-            if self._mode == 'csp':
-                cmd               = PositionCSPCommand()
-                cmd.name          = target
-                cmd.position      = position
-                cmd.speed_limit   = self._csp_defaults['speed_limit']
-                cmd.current_limit = self._csp_defaults['current_limit']
-                pub = self._debug_csp_pubs[source] if self._debug else self._csp_pubs[source]
-                pub.publish(cmd)
+    def _publish_for(self, source: str) -> None:
+        target   = self._motor_map[source]
+        position = self._latest_pos[source]
 
-            elif self._mode == 'pp':
-                cmd              = PositionPPCommand()
-                cmd.name         = target
-                cmd.position     = position
-                cmd.speed        = self._pp_defaults['speed']
-                cmd.acceleration = self._pp_defaults['acceleration']
-                cmd.deceleration = self._pp_defaults['deceleration']
-                cmd.torque_limit = self._pp_defaults['torque_limit']
-                pub = self._debug_pp_pubs[source] if self._debug else self._pp_pubs[source]
-                pub.publish(cmd)
+        if self._mode == 'csp':
+            cmd               = PositionCSPCommand()
+            cmd.name          = target
+            cmd.position      = position
+            cmd.speed_limit   = self._csp_defaults['speed_limit']
+            cmd.current_limit = self._csp_defaults['current_limit']
+            pub = self._debug_csp_pubs[source] if self._debug else self._csp_pubs[source]
+            pub.publish(cmd)
+
+        elif self._mode == 'pp':
+            cmd              = PositionPPCommand()
+            cmd.name         = target
+            cmd.position     = position
+            cmd.speed        = self._pp_defaults['speed']
+            cmd.acceleration = self._pp_defaults['acceleration']
+            cmd.deceleration = self._pp_defaults['deceleration']
+            cmd.torque_limit = self._pp_defaults['torque_limit']
+            pub = self._debug_pp_pubs[source] if self._debug else self._pp_pubs[source]
+            pub.publish(cmd)
 
 
     # ── Shutdown ──────────────────────────────────────────────────────────────

@@ -1,0 +1,8 @@
+.gitignore
+build/
+install/
+dist/
+logs/
+data/
+.venv/
+__pycache__/
