@@ -226,8 +226,10 @@ class MimicNode(Node):
         req.enable = enable
         req.hz     = self._active_report_hz
         res = client.call(req)
-        log = self.get_logger().info if res.success else self.get_logger().error
-        log(f'[{prefix}] Active reporting {action}d: {res.message}')
+        if res.success:
+            self.get_logger().info(f'[{prefix}] Active reporting {action}d: {res.message}')
+        else:
+            self.get_logger().error(f'[{prefix}] Active reporting {action}d: {res.message}')
 
     def _blocking_set_run_mode(self, mode: str) -> None:
         if not self._set_run_mode_client.wait_for_service(timeout_sec=3.0):
@@ -238,8 +240,10 @@ class MimicNode(Node):
         req.mode                     = _MODE_RUN_MODE_INT[mode]
         req.automatic_enable_disable = True
         res = self._set_run_mode_client.call(req)
-        log = self.get_logger().info if res.success else self.get_logger().error
-        log(f'Target motors set to {mode.upper()}: {res.message}')
+        if res.success:
+            self.get_logger().info(f'Target motors set to {mode.upper()}: {res.message}')
+        else:
+            self.get_logger().error(f'Target motors set to {mode.upper()}: {res.message}')
 
     # ── Services ──────────────────────────────────────────────────────────────
 

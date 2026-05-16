@@ -1,0 +1,28 @@
+# Replay a recorded trajectory CSV onto target motors.
+# replay_hz:   0.0  = use value from CSV metadata, then config fallback
+# target_mode: ""   = use target_motors_mode from node config
+
+string  trajectory_name
+float64 replay_hz
+string  target_mode    # "pp" or "csp"; "" = use config default
+bool    step_through
+float32 step_pct
+
+# PP mode parameters (0.0 = use config default)
+float64 pp_speed
+float64 pp_acceleration
+float64 pp_deceleration
+float64 pp_torque_limit
+
+# CSP mode parameters (0.0 = use config default)
+float64 csp_speed_limit
+float64 csp_current_limit
+---
+bool   success
+string message
+int32  frames_published
+---
+int32   frames_published
+int32   frames_total
+float64 elapsed_time
+float32 progress_pct

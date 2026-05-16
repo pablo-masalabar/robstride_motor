@@ -1,0 +1,70 @@
+# mimic node configuration — right arm source, left arm target
+
+# Control mode applied to target motors at startup (csp | pp)
+mode = "pp"
+
+# Debug mode: when true, commands are published to ~/debug/motors/{name}/cmd_*
+# instead of the real target topics. No commands reach the motors.
+debug = false
+
+# Active reporting rate for source motors (Hz)
+active_report_hz = 30.0
+
+# Output command rate (Hz). When set, commands are published by a timer at this
+# rate using the latest received motor position. When absent or 0, commands are
+# forwarded immediately on every incoming state message.
+# op_hz = 30.0
+
+# ROS 2 node name prefixes used to reach source / target motor node services
+source_node_prefix = "/right_arm"
+target_node_prefix = "/left_arm"
+
+# Topic pattern for individual source motor state.
+# {name} is replaced with each source motor name.
+source_motor_state_topic_pattern = "/right_arm/motors/{name}/state"
+
+# Topic patterns for target motor commands.
+# {name} is replaced with the target motor name from motor_map.
+target_csp_topic_pattern = "/left_arm/motors/{name}/cmd_position_csp"
+target_pp_topic_pattern  = "/left_arm/motors/{name}/cmd_position_pp"
+
+# Motors whose state is subscribed to (commands are read from these)
+source_motors = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
+
+# Motors that commands are forwarded to
+target_motors = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
+
+# Mapping: source motor → target motor
+# Every source_motor must appear here; every value must be in target_motors
+[motor_map]
+SpR = "SpL"
+SrR = "SrL"
+SwR = "SwL"
+EpR = "EpL"
+WwR = "WwL"
+WpR = "WpL"
+WrR = "WrL"
+
+# Default motion parameters applied to every command published by the node.
+# All fields are optional; 0 means use the motor node / firmware default.
+
+[pp_defaults]
+speed        = 10.0    # rad/s  — max speed during motion
+acceleration = 10.0   # rad/s² — acceleration ramp
+deceleration = 10.0   # rad/s² — deceleration ramp (0 = same as acceleration)
+torque_limit = 15.0    # N·m   — 0 = motor T_MAX
+
+[csp_defaults]
+speed_limit   = 10.0   # rad/s — speed limit
+current_limit = 20.0   # A    — 0 = motor MAX_CURRENT_A
+
+# Mapping: source motor → transform function name from mimic/transforms.py
+# If a source motor is omitted the position is forwarded unchanged (passthrough)
+[transform_map]
+SpR = "negate"
+SrR = "negate"
+SwR = "negate"
+EpR = "negate"
+WwR = "negate"
+WpR = "subtract_from_2pi"
+WrR = "passthrough"

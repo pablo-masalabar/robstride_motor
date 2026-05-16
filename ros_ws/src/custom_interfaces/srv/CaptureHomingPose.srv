@@ -1,0 +1,12 @@
+# Captures current motor positions and saves them as homing pose in a .toml file.
+# arm:         "source" or "target" — which arm to read positions from
+# config_file: filename or absolute path for the homing .toml to write;
+#              if it doesn't exist it is created from an existing homing .toml template
+
+string arm
+string config_file
+---
+bool      success
+string    message
+string[]  motors      # motors whose positions were captured
+float64[] positions   # corresponding captured positions (rad)

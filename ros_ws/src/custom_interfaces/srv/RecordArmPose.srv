@@ -1,0 +1,10 @@
+# Capture current motor states of the source or target arm and save to a CSV.
+# arm:  "source" or "target"
+# name: filename without extension; empty = H_M_S_DD_MM_YY timestamp
+
+string arm
+string name
+---
+bool   success
+string message
+string file_path

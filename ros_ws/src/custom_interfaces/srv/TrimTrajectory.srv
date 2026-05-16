@@ -1,0 +1,14 @@
+# Load a recorded trajectory CSV and remove rows whose timestamp falls
+# inside any of the [start_ts, end_ts] ranges (exclusive on both ends).
+# trajectory_name: filename without extension (resolved via export_path).
+# start_ts and end_ts are parallel lists — one entry per trim range.
+
+string    trajectory_name
+float64[] start_ts
+float64[] end_ts
+---
+bool   success
+string message
+int32  rows_before
+int32  rows_after
+int32  rows_removed

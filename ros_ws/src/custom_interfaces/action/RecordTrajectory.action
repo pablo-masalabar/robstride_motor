@@ -1,0 +1,13 @@
+# Record source motor states to a CSV file at trajectory_record_hz.
+# trajectory_name: filename without extension; if empty, uses H_M_S_DD_MM_YY timestamp.
+# Action stays active until the stop_recording service is called.
+
+string trajectory_name
+---
+bool   success
+string message
+string file_path
+int32  samples_recorded
+---
+int32   samples_recorded
+float64 elapsed_time

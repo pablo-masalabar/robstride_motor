@@ -1,0 +1,10 @@
+# remote_joystick — local machine config (client mode)
+# Reads local joystick and forwards data to the remote WebSocket server
+
+hz = 20.0
+debug = false
+joy_topic = "joy"
+mode = "client"
+
+# URL of the remote machine running the server
+server_url = "http://50.18.224.111:15010"

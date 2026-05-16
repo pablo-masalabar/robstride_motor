@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 # SDL must be told to use dummy drivers before pygame.init() is called,
 # otherwise it tries to open a display/audio device which fails in a container.
@@ -25,14 +26,23 @@ def main():
     print(f'  axes={js.get_numaxes()}  buttons={js.get_numbuttons()}  hats={js.get_numhats()}')
     print()
 
+    _last_t = time.monotonic()
+    _hz     = 0.0
+
     try:
         while True:
             pygame.event.pump()
+
+            now   = time.monotonic()
+            dt    = now - _last_t
+            _last_t = now
+            _hz   = 1.0 / dt if dt > 0 else 0.0
 
             axes    = '  '.join(f'a[{i}]={js.get_axis(i):+.2f}'   for i in range(js.get_numaxes()))
             buttons = '  '.join(f'b[{i}]={js.get_button(i)}'       for i in range(js.get_numbuttons()))
             hats    = '  '.join(f'h[{i}]={js.get_hat(i)}'          for i in range(js.get_numhats()))
 
+            print(f'HZ      {_hz:.1f}')
             print(f'AXES    {axes}')
             print(f'BUTTONS {buttons}')
             if js.get_numhats():

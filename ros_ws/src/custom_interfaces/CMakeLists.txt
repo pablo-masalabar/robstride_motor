@@ -9,6 +9,7 @@ find_package(action_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   # Messages
+  "msg/JointCommand.msg"
   "msg/MotorState.msg"
   "msg/MotorFault.msg"
   "msg/OperationCommand.msg"
@@ -29,10 +30,19 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MotorParam.srv"
   "srv/SetMimicMode.srv"
   "srv/SetMimicParams.srv"
+  "srv/CaptureHomingPose.srv"
+  "srv/RecordArmPose.srv"
+  "srv/SetArmPose.srv"
+  "srv/StopTrajectoryRecording.srv"
+  "srv/TrimTrajectory.srv"
   "srv/EnableMimicMotors.srv"
   # Actions
   "action/MoveToPosition.action"
   "action/SetVelocity.action"
+  "action/Homing.action"
+  "action/RecordTrajectory.action"
+  "action/ReplayTrajectory.action"
+  "action/SimulateTrajectory.action"
   DEPENDENCIES
     std_msgs
     builtin_interfaces

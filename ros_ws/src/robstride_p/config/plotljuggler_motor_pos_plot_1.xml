@@ -6,9 +6,9 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.083442" bottom="-1.000000" top="1.000000" right="12.047842"/>
+       <range left="228.316236" bottom="-1.000000" top="1.000000" right="233.202846"/>
        <limitY max="1" min="-1"/>
-       <curve name="/left_arm/motors/SpL/state/position" color="#1f77b4"/>
+       <curve name="/left_arm/motors/SpL/state/position" color="#ffc318"/>
        <curve name="/mimic_node/mimic/debug/motors/SpR/cmd_position_pp/position" color="#d62728"/>
        <curve name="/right_arm/motors/SpR/state/position" color="#1ac938"/>
        <curve name="/mimic_node/mimic/debug/motors/SpL/cmd_position_pp/position" color="#1f77b4"/>
@@ -22,11 +22,11 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.083350" bottom="-3.140000" top="3.140000" right="12.047819"/>
+       <range left="228.315639" bottom="-3.140000" top="3.140000" right="233.202783"/>
        <limitY max="3.14" min="-3.14"/>
        <curve name="/left_arm/motors/SrL/state/position" color="#ff7f0e"/>
        <curve name="/mimic_node/mimic/debug/motors/SrR/cmd_position_pp/position" color="#f14cc1"/>
-       <curve name="/right_arm/motors/SrR/state/position" color="#9467bd"/>
+       <curve name="/right_arm/motors/SrR/state/position" color="#34d800"/>
        <curve name="/mimic_node/mimic/debug/motors/SrL/cmd_position_pp/position" color="#d62728"/>
       </plot>
      </DockArea>
@@ -38,10 +38,10 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.082978" bottom="-3.140000" top="3.140000" right="12.047783"/>
+       <range left="228.315585" bottom="-3.140000" top="3.140000" right="233.202811"/>
        <limitY max="3.14" min="-3.14"/>
        <curve name="/left_arm/motors/SwL/state/position" color="#17becf"/>
-       <curve name="/mimic_node/mimic/debug/motors/SwR/cmd_position_pp/position" color="#bcbd22"/>
+       <curve name="/mimic_node/mimic/debug/motors/SwR/cmd_position_pp/position" color="#efff00"/>
        <curve name="/right_arm/motors/SwR/state/position" color="#1f77b4"/>
        <curve name="/mimic_node/mimic/debug/motors/SwL/cmd_position_pp/position" color="#1ac938"/>
       </plot>
@@ -54,11 +54,11 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.083267" bottom="-8.000000" top="8.000000" right="12.047863"/>
+       <range left="228.316651" bottom="-8.000000" top="8.000000" right="233.202832"/>
        <limitY max="8" min="-8"/>
        <curve name="/left_arm/motors/EpL/state/position" color="#d62728"/>
        <curve name="/mimic_node/mimic/debug/motors/EpR/cmd_position_pp/position" color="#1ac938"/>
-       <curve name="/right_arm/motors/EpR/state/position" color="#ff7f0e"/>
+       <curve name="/right_arm/motors/EpR/state/position" color="#0e59ff"/>
        <curve name="/mimic_node/mimic/debug/motors/EpL/cmd_position_pp/position" color="#ff7f0e"/>
       </plot>
      </DockArea>
@@ -70,10 +70,10 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.082934" bottom="-0.222984" top="0.224518" right="12.047923"/>
+       <range left="228.316154" bottom="-0.494025" top="0.494025" right="233.202759"/>
        <limitY/>
-       <curve name="/left_arm/motors/WwL/state/position" color="#f14cc1"/>
-       <curve name="/mimic_node/mimic/debug/motors/WwR/cmd_position_pp/position" color="#9467bd"/>
+       <curve name="/left_arm/motors/WwL/state/position" color="#ff0d00"/>
+       <curve name="/mimic_node/mimic/debug/motors/WwR/cmd_position_pp/position" color="#0024e7"/>
        <curve name="/right_arm/motors/WwR/state/position" color="#17becf"/>
        <curve name="/mimic_node/mimic/debug/motors/WwL/cmd_position_pp/position" color="#f14cc1"/>
       </plot>
@@ -86,12 +86,12 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.083075" bottom="-0.121854" top="6.405799" right="12.047884"/>
+       <range left="228.315687" bottom="-0.050944" top="6.334124" right="233.202858"/>
        <limitY/>
-       <curve name="/left_arm/motors/WpL/state/position" color="#bcbd22"/>
-       <curve name="/right_arm/motors/WpR/state/position" color="#1f77b4"/>
+       <curve name="/left_arm/motors/WpL/state/position" color="#fdff00"/>
+       <curve name="/right_arm/motors/WpR/state/position" color="#26b41f"/>
        <curve name="/mimic_node/mimic/debug/motors/WpR/cmd_position_pp/position" color="#d62728"/>
-       <curve name="/mimic_node/mimic/debug/motors/WpL/cmd_position_pp/position" color="#9467bd"/>
+       <curve name="/mimic_node/mimic/debug/motors/WpL/cmd_position_pp/position" color="#0010fe"/>
       </plot>
      </DockArea>
     </DockSplitter>
@@ -102,7 +102,7 @@
     <DockSplitter sizes="1" orientation="-" count="1">
      <DockArea name="...">
       <plot line_width="1.0" flip_x="false" mode="TimeSeries" flip_y="false">
-       <range left="7.083215" bottom="-10.000000" top="10.000000" right="12.047904"/>
+       <range left="228.315752" bottom="-10.000000" top="10.000000" right="233.202798"/>
        <limitY max="10" min="-10"/>
        <curve name="/mimic_node/mimic/debug/motors/WrR/cmd_position_pp/position" color="#1ac938"/>
        <curve name="/right_arm/motors/WrR/state/position" color="#ff7f0e"/>
@@ -113,7 +113,7 @@
     </DockSplitter>
    </Container>
   </Tab>
-  <currentTabIndex index="6"/>
+  <currentTabIndex index="5"/>
  </tabbed_widget>
  <use_relative_time_offset enabled="1"/>
  <!-- - - - - - - - - - - - - - - -->

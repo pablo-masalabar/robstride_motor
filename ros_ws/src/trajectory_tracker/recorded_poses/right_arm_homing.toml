@@ -1,0 +1,16 @@
+# right arm homing configuration
+
+[homing_pos]
+SpR = 0.058884
+SrR = -0.032415
+SwR = 0.048911
+EpR = -0.069626
+WwR = 0.051979
+WpR = 0.076147
+WrR = -2.228593
+
+[pp_defaults]
+speed        = 2.50   # rad/s
+acceleration = 1.0    # rad/s²
+deceleration = 1.0    # rad/s²
+torque_limit = 15.0   # N·m

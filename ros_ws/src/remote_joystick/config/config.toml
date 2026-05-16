@@ -1,0 +1,23 @@
+# remote_joystick node configuration
+
+# Publishing rate in Hz (minimum 20.0)
+hz = 20.0
+
+# Enable verbose debug logging
+debug = false
+
+# ROS 2 topic name for Joy messages
+joy_topic = "joy"
+
+# Operating mode: "standalone", "server", or "client"
+#   standalone  - read local joystick, publish Joy directly
+#   server      - receive gamepad data from remote WebSocket clients, publish Joy
+#   client      - read local joystick, forward data to a remote WebSocket server
+mode = "standalone"
+
+# Server mode: host and port to listen on
+listen_host = "0.0.0.0"
+listen_port = 8765
+
+# Client mode: URL of the remote WebSocket server
+# server_url = "http://192.168.1.100:8765"

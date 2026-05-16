@@ -226,6 +226,9 @@ class MotorNode(Node):
             self._fault_pubs[name] = self.create_publisher(
                 MotorFault, self._topic(f'motors/{name}/fault'), 10
             )
+            self._motors[name].set_feedback_callback(
+                lambda fb, n=name: self._on_feedback(n, fb)
+            )
 
         # ── Subscribers — one topic per control mode ────────────────────────
         _mode_subs = [
@@ -414,6 +417,11 @@ class MotorNode(Node):
 
     # ── Timer callback ───────────────────────────────────────────────────────
 
+    def _on_feedback(self, name: str, fb) -> None:
+        now      = self.get_clock().now().to_msg()
+        user_pos = self._user_pos(name, fb.position)
+        self._state_pubs[name].publish(self._build_state_msg(name, fb, user_pos, now))
+
     def _update_cb(self) -> None:
         if not self._motors:
             return
@@ -423,16 +431,13 @@ class MotorNode(Node):
         js.header.stamp = now
 
         for name, motor in self._motors.items():
-            fb = motor.feedback
-
+            fb       = motor.feedback
             user_pos = self._user_pos(name, fb.position)
 
             js.name.append(name)
             js.position.append(user_pos)
             js.velocity.append(fb.velocity)
             js.effort.append(fb.torque)
-
-            self._state_pubs[name].publish(self._build_state_msg(name, fb, user_pos, now))
 
             if (self._motor_mode.get(name) == RunMode.VELOCITY
                     and self._motor_enabled.get(name, False)):
@@ -446,7 +451,6 @@ class MotorNode(Node):
                         f'[{name}] Joint limit exceeded in velocity mode '
                         f'(pos={user_pos:.4f} rad, limits=[{lo}, {hi}]) — motor disabled'
                     )
-
 
             if fb.fault != self._last_fault[name]:
                 new_bits     = fb.fault & ~self._last_fault[name]

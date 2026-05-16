@@ -1,0 +1,14 @@
+# Load a recorded trajectory CSV and publish each frame as a JointCommand.
+# trajectory_name: filename without extension (resolved via export_path).
+# replay_hz: publish rate; if 0.0, uses original inter-frame timestamps from the CSV.
+
+string  trajectory_name
+float64 replay_hz
+---
+bool   success
+string message
+int32  frames_published
+---
+int32   frames_published
+int32   frames_total
+float64 elapsed_time

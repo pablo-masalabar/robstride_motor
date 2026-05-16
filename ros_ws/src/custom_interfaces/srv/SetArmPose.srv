@@ -1,0 +1,21 @@
+# Load a recorded pose CSV from recorded_poses dir, enable motors, set mode and send positions.
+# name:        CSV filename without extension
+# arm:         "source" or "target" — which arm to command (default: "target")
+# target_mode: "pp" or "csp"
+# Mode params: 0.0 = use node config default
+
+string name
+string arm
+string target_mode
+
+float64 pp_speed
+float64 pp_acceleration
+float64 pp_deceleration
+float64 pp_torque_limit
+
+float64 csp_speed_limit
+float64 csp_current_limit
+---
+bool     success
+string   message
+string[] motors_set

@@ -1,0 +1,21 @@
+"""
+transforms.py – Per-motor position transform functions for the trajectory_tracker node.
+
+Each function signature:
+    (position: float) -> float
+
+Reference a function by name in config.toml under [transform_map].
+If no function is specified for a motor the position is forwarded unchanged.
+"""
+
+def passthrough(position: float) -> float:
+    return position
+
+def negate(position: float) -> float:
+    return -position
+
+def subtract_from_2pi(position: float) -> float:
+    return 2 * 3.14159 - position
+
+def subtract_2pi(position: float) -> float:
+    return position - 2 * 3.14159

@@ -7,28 +7,30 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     config_path = LaunchConfiguration('config_path')
-
-    return LaunchDescription([
-        DeclareLaunchArgument(
+    ld = LaunchDescription()
+    config = DeclareLaunchArgument(
             'config_path',
             default_value=PathJoinSubstitution(
                 [FindPackageShare('teleop'), 'config', 'config.toml']
             ),
             description='Path to teleop config.toml',
-        ),
-
-        Node(
+        )
+    joy_node = Node(
             package='joy',
             executable='joy_node',
             name='joy_node',
             output='screen',
-        ),
+        )
 
-        Node(
+    teleop_node = Node(
             package='teleop',
             executable='teleop_node',
             name='teleop_node',
             output='screen',
             parameters=[{'config_path': config_path}],
-        ),
-    ])
+        )
+
+    ld.add_action(config)
+    ld.add_action(teleop_node)
+
+    return ld

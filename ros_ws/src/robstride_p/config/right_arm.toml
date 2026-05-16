@@ -4,7 +4,7 @@
 node_name                  = "right_arm" # ROS2 node name
 use_node_name_as_topic_base = true        # false → topics are published at root namespace
 master_id               = 253          # host CAN ID embedded in outgoing frames (0xFD)
-channel                 = "can0"       # SocketCAN network interface name
+channel                 = "can1"       # SocketCAN network interface name
 bustype                 = "socketcan"  # python-can bus type
 bitrate                 = 1000000      # CAN baud rate in bps
 rx_timeout              = 0.05         # reply wait time in seconds

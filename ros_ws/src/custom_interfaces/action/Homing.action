@@ -1,0 +1,13 @@
+# Execute homing: move motors to their configured home positions in PP mode.
+# Motor names in [homing_pos] must all match either source or target motors.
+# config_path: filename or absolute path to a homing .toml in recorded_poses/
+
+string config_path
+---
+bool     success
+string   message
+string[] homed_motors
+---
+string motor_name
+int32  motors_done
+int32  motors_total

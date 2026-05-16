@@ -8,7 +8,7 @@ mode = "pp"
 debug = false
 
 # Active reporting rate for source motors (Hz)
-active_report_hz = 60.0
+active_report_hz = 30.0
 
 # Output command rate (Hz). When set, commands are published by a timer at this
 # rate using the latest received motor position. When absent or 0, commands are
@@ -49,9 +49,9 @@ WrL = "WrR"
 # All fields are optional; 0 means use the motor node / firmware default.
 
 [pp_defaults]
-speed        = 25.0    # rad/s  — max speed during motion
-acceleration = 30.0   # rad/s² — acceleration ramp
-deceleration = 30.0   # rad/s² — deceleration ramp (0 = same as acceleration)
+speed        = 10.0    # rad/s  — max speed during motion
+acceleration = 10.0   # rad/s² — acceleration ramp
+deceleration = 10.0   # rad/s² — deceleration ramp (0 = same as acceleration)
 torque_limit = 15.0    # N·m   — 0 = motor T_MAX
 
 [csp_defaults]
@@ -63,8 +63,8 @@ current_limit = 20.0   # A    — 0 = motor MAX_CURRENT_A
 [transform_map]
 SpL = "negate"
 SrL = "negate"
-SwL = "subtract_from_2pi"
+SwL = "negate"
 EpL = "negate"
-WwL = "subtract_from_2pi"
+WwL = "negate"
 WpL = "subtract_from_2pi"
 WrL = "passthrough"

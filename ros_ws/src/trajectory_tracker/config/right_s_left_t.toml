@@ -1,0 +1,70 @@
+# trajectory_tracker node configuration — right arm source, left arm target
+
+# Base name prepended to all service, action, and topic names
+node_name = "trajectory_tracker"
+
+# Optional: absolute path to the package root (src or install).
+# If empty, defaults to the directory containing this package's Python files.
+# package_path = "/home/user/ros_ws/src/trajectory_tracker"
+
+source_node_prefix = "/right_arm"
+target_node_prefix = "/left_arm"
+
+active_report_hz      = 30.0
+trajectory_record_hz  = 30.0   # Hz at which source motor states are sampled into the CSV
+replay_hz             = 30.0   # fallback replay Hz if not in CSV metadata or goal
+
+# Default command mode for target motors: "pp", "csp", or "velocity"
+target_motors_mode = "pp"
+
+source_motor_state_topic_pattern  = "/right_arm/motors/{name}/state"
+target_pp_topic_pattern           = "/left_arm/motors/{name}/cmd_position_pp"
+target_csp_topic_pattern          = "/left_arm/motors/{name}/cmd_position_csp"
+
+# Motors whose state will be recorded as the source trajectory
+source_motors = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
+
+# Motors that will replay the recorded trajectory
+target_motors = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
+
+# Explicit source → target motor mapping (overrides parallel source/target lists)
+[motor_map]
+SpR = "SpL"
+SrR = "SrL"
+SwR = "SwL"
+EpR = "EpL"
+WwR = "WwL"
+WpR = "WpL"
+WrR = "WrL"
+
+# Per-source-motor transform applied to position/velocity before publishing to target.
+# If a motor is omitted the value is forwarded unchanged (passthrough).
+[transform_map]
+SpR = "negate"
+SrR = "negate"
+SwR = "negate"
+EpR = "negate"
+WwR = "negate"
+WpR = "subtract_from_2pi"
+WrR = "passthrough"
+
+# Inverse transforms applied when going target → source (keyed by source motor name)
+[inverse_transform_map]
+SpR = "negate"
+SrR = "negate"
+SwR = "negate"
+EpR = "negate"
+WwR = "negate"
+WpR = "subtract_from_2pi"
+WrR = "passthrough"
+
+[pp_defaults]
+speed        = 25.0   # rad/s
+acceleration = 30.0   # rad/s²
+deceleration = 30.0   # rad/s²
+torque_limit = 15.0   # N·m
+
+[csp_defaults]
+speed_limit   = 10.0  # rad/s
+current_limit = 0.0   # A (0 = motor default)
+

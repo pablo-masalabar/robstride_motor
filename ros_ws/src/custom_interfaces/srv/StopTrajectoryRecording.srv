@@ -1,0 +1,7 @@
+# Stop an active record_trajectory action.
+
+---
+bool   success
+string message
+string file_path
+int32  samples_recorded

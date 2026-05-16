@@ -10,12 +10,12 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('mimic')
 
-    default_config = os.path.join(pkg_share, 'config', 'config.toml')
+    default_config = os.path.join(pkg_share, 'config', 'left_s_right_t.toml')
 
     config_arg = DeclareLaunchArgument(
         'config',
         default_value=default_config,
-        description='Absolute path to the mimic config.toml file',
+        description='Absolute path to the mimic config toml file',
     )
 
     mimic_node = Node(
