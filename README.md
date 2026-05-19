@@ -1,91 +1,196 @@
-# RobStride Motor Driver
+# RobStride Robot Workspace
 
-Python CAN driver and ROS 2 node for the **RobStride RS01–RS05** quasi-direct-drive
-integrated motor modules.
+ROS 2 workspace for a dual-arm robot (Featherbot) built on **RobStride RS01–RS05** quasi-direct-drive motors. Covers the full stack: raw CAN driver → ROS 2 motor node → arm mirroring → trajectory record/replay.
 
 ---
 
 ## Table of Contents
 
-1. [Hardware Overview](#1-hardware-overview)
-2. [CAN Bus Primer](#2-can-bus-primer)
-3. [RS0x Private CAN Protocol](#3-rs0x-private-can-protocol)
-   - [Frame Format](#31-frame-format)
-   - [Communication Types](#32-communication-types)
-   - [Operation Control Mode (type 1)](#33-operation-control-mode-type-1)
-   - [Feedback Frame (type 2)](#34-feedback-frame-type-2)
-   - [Fault Feedback Frame (type 21)](#35-fault-feedback-frame-type-21)
-   - [Parameter Read / Write (types 17 & 18)](#36-parameter-read--write-types-17--18)
-4. [Software Architecture](#4-software-architecture)
-5. [comms.py — CAN Transport Layer](#5-commspy--can-transport-layer)
-6. [motor_base.py — Protocol Implementation](#6-motor_basepy--protocol-implementation)
-7. [Motor Classes RS01–RS05](#7-motor-classes-rs01rs05)
-8. [ROS 2 Package — robstride_p](#8-ros-2-package--robstride_p)
+1. [Repository Layout](#1-repository-layout)
+2. [Docker Quickstart](#2-docker-quickstart)
+3. [Build (Native)](#3-build-native)
+4. [CAN Interface Setup](#4-can-interface-setup)
+5. [Package Overview](#5-package-overview)
+6. [Hardware Overview](#6-hardware-overview)
+7. [RS0x Private CAN Protocol](#7-rs0x-private-can-protocol)
+   - [Frame Format](#71-frame-format)
+   - [Communication Types](#72-communication-types)
+   - [Operation Control Mode (type 1)](#73-operation-control-mode-type-1)
+   - [Feedback Frame (type 2)](#74-feedback-frame-type-2)
+   - [Fault Feedback Frame (type 21)](#75-fault-feedback-frame-type-21)
+   - [Parameter Read / Write (types 17 & 18)](#76-parameter-read--write-types-17--18)
+8. [robstride_p — Motor Node](#8-robstride_p--motor-node)
    - [config.toml](#81-configtoml)
-   - [Topics](#82-topics)
-   - [Services](#83-services)
-   - [Actions](#84-actions)
-   - [Custom Interfaces](#85-custom-interfaces)
-9. [Build & Run](#9-build--run)
-10. [Standalone Usage (no ROS 2)](#10-standalone-usage-no-ros-2)
+   - [Joint Limits & Homing](#82-joint-limits--homing)
+   - [Command Flow](#83-command-flow)
+   - [Topics](#84-topics)
+   - [Services](#85-services)
+   - [Actions](#86-actions)
+   - [Fault Detection & Recovery](#87-fault-detection--recovery)
+9. [mimic — Arm Mirroring](#9-mimic--arm-mirroring)
+10. [trajectory_tracker — Record & Replay](#10-trajectory_tracker--record--replay)
+11. [custom_interfaces](#11-custom_interfaces)
+12. [Software Architecture](#12-software-architecture)
+13. [Standalone Usage (no ROS 2)](#13-standalone-usage-no-ros-2)
 
 ---
 
-## 1. Hardware Overview
+## 1. Repository Layout
 
-| Model | Peak torque | Output no-load speed | Max current | Weight |
-|-------|------------|---------------------|-------------|--------|
-| RS01  | 17 N·m     | 315 rpm  (33 rad/s) | 23 Apk      | 380 g  |
-| RS02  | 17 N·m     | 410 rpm  (44 rad/s) | 23 Apk      | 380 g  |
-| RS03  | 60 N·m     | 200 rpm  (21 rad/s) | 43 Apk      | 880 g  |
-| RS04  | 120 N·m    | 200 rpm  (21 rad/s) | 90 Apk      | 1420 g |
-| RS05  | 6 N·m      | 480 rpm  (50 rad/s) | 11 Apk      | 191 g  |
-
-All motors share the same private CAN 2.0 protocol (1 Mbps, 29-bit extended
-frame) and the same driver board interface: **VBAT+**, **GND**, **CAN-H**, **CAN-L**.
-
-**Wiring:**
-- Power: 24–60 V DC on VBAT+ / GND (48 V nominal for RS02–RS05, 36 V for RS01).
-- CAN: twisted-pair CAN-H / CAN-L with 120 Ω termination resistors at both ends of the bus.
-- Multiple motors daisy-chain on the same CAN bus; each is addressed by its **motor CAN ID** (0–127).
+```
+claude/
+├── docker/
+│   ├── Dockerfile          # CUDA 12.6 + ROS 2 Jazzy + python-can + PyTorch
+│   └── compose.yaml
+├── README.md               # this file
+└── ros_ws/
+    └── src/
+        ├── custom_interfaces/      # shared ROS 2 msgs / srvs / actions
+        ├── robstride_p/            # CAN driver + ROS 2 motor node
+        ├── mimic/                  # real-time arm mirroring
+        ├── trajectory_tracker/     # trajectory record, replay, pose capture
+        ├── teleop/                 # teleoperation
+        ├── remote_joystick/        # remote joystick input
+        ├── featherbot_bringup/     # robot bringup launch files
+        ├── featherbot_description/ # URDF / robot description
+        ├── featherbot_ros2_control/# ros2_control integration
+        └── mimic_sim/              # simulation for mimic
+```
 
 ---
 
-## 2. CAN Bus Primer
+## 2. Docker Quickstart
 
-CAN (Controller Area Network) is a differential serial bus designed for noisy
-environments.  Key properties relevant to this driver:
-
-| Property | Value |
-|----------|-------|
-| Baud rate | 1 Mbps |
-| Frame format | CAN 2.0B **extended** (29-bit arbitration ID) |
-| Data payload | 8 bytes per frame |
-| Linux interface | SocketCAN (`can0`, `can1`, …) |
-
-**Bring up a SocketCAN interface:**
+The Docker image bundles **CUDA 12.6**, **ROS 2 Jazzy**, **python-can**, **PyTorch (cu126)**, and all system tools (neovim, tmux, ranger, fzf).
 
 ```bash
+# Build (run from the claude/ directory)
+docker compose -f docker/compose.yaml build
+
+# Start container
+docker compose -f docker/compose.yaml up -d
+
+# Shell into container
+docker compose -f docker/compose.yaml exec anuj_exp bash
+
+# Inside container — workspace is already sourced in .bashrc
+cd /ros_ws && colcon build
+```
+
+**Key compose settings:**
+
+| Setting | Value |
+|---|---|
+| `network_mode` | `host` — direct access to CAN interfaces and ROS 2 DDS |
+| `privileged: true` | required for SocketCAN |
+| `runtime: nvidia` | NVIDIA GPU passthrough |
+| `/dev` volume | full device access (CAN adapters, etc.) |
+| `ROS_DOMAIN_ID` | `0` |
+
+**Build args** (override CUDA base):
+```bash
+docker build --build-arg CUDA_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu24.04 -f docker/Dockerfile .
+```
+
+**User matching** — the Dockerfile accepts `USER_ID` / `GROUP_ID` build args (default 1000) so the in-container user owns workspace files without permission issues.
+
+---
+
+## 3. Build (Native)
+
+```bash
+# Prerequisites
+sudo apt install ros-jazzy-ros-base ros-jazzy-sensor-msgs ros-jazzy-std-srvs \
+                 ros-jazzy-action-msgs ros-jazzy-rosidl-default-generators \
+                 python3-colcon-common-extensions can-utils iproute2
+pip install python-can
+
+# Build
+cd claude/ros_ws
+colcon build
+source install/setup.bash
+
+# Or build a single package
+colcon build --packages-select robstride_p
+```
+
+---
+
+## 4. CAN Interface Setup
+
+```bash
+# Bring up each CAN interface (repeat per interface)
 sudo ip link set can0 type can bitrate 1000000
 sudo ip link set can0 up
+
+# Verify
+ip link show can0
+candump can0   # live frame monitor
 ```
 
-**python-can** is used as the CAN library abstraction:
+The robot uses three CAN buses:
 
-```bash
-pip install python-can
-```
+| Interface | Motors |
+|---|---|
+| `can0` | `base_and_neck` — torso and neck motors |
+| `can1` | `right_arm` — SpR, SrR, SwR, EpR, WwR, WpR, WrR |
+| `can2` | `left_arm` — SpL, SrL, SwL, EpL, WwL, WpL, WrL |
 
 ---
 
-## 3. RS0x Private CAN Protocol
+## 5. Package Overview
 
-The RS0x motors support three protocols: **Private** (default), CANopen, and MIT.
-This driver uses the **Private protocol exclusively**.
+| Package | Description |
+|---|---|
+| `robstride_p` | CAN driver (comms.py, motor_base.py, rs01–rs05) + ROS 2 motor node. Runs one node per arm / body segment. |
+| `mimic` | Mirrors one arm onto the other in real time with per-joint transforms and live direction switching. |
+| `trajectory_tracker` | Records arm states to CSV and replays them with full cross-arm transform support. |
+| `custom_interfaces` | Shared ROS 2 messages, services, and actions used by all packages above. |
+| `teleop` | Keyboard / controller teleoperation. |
+| `remote_joystick` | Remote joystick input forwarding. |
+| `featherbot_bringup` | Top-level launch files. |
+| `featherbot_description` | URDF and mesh assets. |
+| `featherbot_ros2_control` | ros2_control hardware interface. |
+| `mimic_sim` | Gazebo / simulation support for the mimic node. |
 
-### 3.1 Frame Format
+---
 
-Every frame uses a **29-bit extended arbitration ID** structured as:
+## 6. Hardware Overview
+
+| Model | Peak torque | Output speed | Max current | Weight |
+|---|---|---|---|---|
+| RS01 | 17 N·m | 315 rpm (33 rad/s) | 23 Apk | 380 g |
+| RS02 | 17 N·m | 410 rpm (44 rad/s) | 23 Apk | 380 g |
+| RS03 | 60 N·m | 200 rpm (21 rad/s) | 43 Apk | 880 g |
+| RS04 | 120 N·m | 200 rpm (21 rad/s) | 90 Apk | 1420 g |
+| RS05 | 6 N·m | 480 rpm (50 rad/s) | 11 Apk | 191 g |
+
+All motors share the same private CAN 2.0 protocol (1 Mbps, 29-bit extended frame) and connector pinout: **VBAT+**, **GND**, **CAN-H**, **CAN-L**.
+
+**Wiring:**
+- Power: 24–60 V DC (48 V nominal for RS02–RS05, 36 V for RS01).
+- CAN: twisted-pair CAN-H / CAN-L with 120 Ω termination at both ends of the bus.
+- Multiple motors daisy-chain on the same bus; each is addressed by its **motor CAN ID** (0–127).
+
+**Robot motor assignment:**
+
+| Joint | Left | Right | Model | CAN bus |
+|---|---|---|---|---|
+| Shoulder pitch | SpL (id 32) | SpR (id 16) | RS04 | can2 / can1 |
+| Shoulder roll | SrL (id 33) | SrR (id 17) | RS04 | can2 / can1 |
+| Shoulder wrist-yaw | SwL (id 34) | SwR (id 18) | RS03 | can2 / can1 |
+| Elbow pitch | EpL (id 35) | EpR (id 19) | RS03 | can2 / can1 |
+| Wrist wrist-yaw | WwL (id 36) | WwR (id 20) | RS02 | can2 / can1 |
+| Wrist pitch | WpL (id 37) | WpR (id 21) | RS02 | can2 / can1 |
+| Wrist roll | WrL (id 38) | WrR (id 22) | RS02 | can2 / can1 |
+
+---
+
+## 7. RS0x Private CAN Protocol
+
+### 7.1 Frame Format
+
+Every frame uses a **29-bit extended arbitration ID**:
 
 ```
  Bit 28       Bit 24   Bit 23        Bit 8   Bit 7       Bit 0
@@ -96,70 +201,47 @@ Every frame uses a **29-bit extended arbitration ID** structured as:
 └────────────────────┴───────────────────────┴──────────────────┘
 ```
 
-The 8-byte data payload (Data Area 1) carries command arguments.
-
-**ID construction in Python:**
-
 ```python
 arb_id = ((comm_type & 0x1F) << 24) | ((data_area2 & 0xFFFF) << 8) | motor_id
 ```
 
-### 3.2 Communication Types
+### 7.2 Communication Types
 
-| Type | Hex | Direction | Purpose |
-|------|-----|-----------|---------|
-| 0  | 0x00 | Host → Motor | Get device ID (64-bit MCU UID) |
-| 1  | 0x01 | Host → Motor | **Operation control** (angle + velocity + Kp + Kd + torque ff) |
-| 2  | 0x02 | Motor → Host | **Motor feedback** (position, velocity, torque, temperature, fault) |
-| 3  | 0x03 | Host → Motor | Enable motor (enter run state) |
-| 4  | 0x04 | Host → Motor | Stop motor |
-| 6  | 0x06 | Host → Motor | Set mechanical zero |
-| 7  | 0x07 | Host → Motor | Change motor CAN ID |
-| 17 | 0x11 | Host ↔ Motor | Single parameter read (request + reply) |
-| 18 | 0x12 | Host → Motor | Single parameter write (volatile) |
-| 21 | 0x15 | Motor → Host | **Fault feedback** (extended fault + warning bitmasks) |
-| 22 | 0x16 | Host → Motor | Save parameters to flash |
-| 23 | 0x17 | Host → Motor | Change baud rate (re-power-on effect) |
-| 24 | 0x18 | Host → Motor | Enable / disable active reporting |
-| 25 | 0x19 | Host → Motor | Switch protocol (re-power-on effect) |
+| Type | Direction | Purpose |
+|---|---|---|
+| 0 | Host → Motor | Get device ID (64-bit MCU UID) |
+| 1 | Host → Motor | **Operation control** (angle + velocity + Kp + Kd + torque ff) |
+| 2 | Motor → Host | **Motor feedback** (position, velocity, torque, temperature, fault) |
+| 3 | Host → Motor | Enable motor |
+| 4 | Host → Motor | Stop motor |
+| 6 | Host → Motor | Set mechanical zero |
+| 7 | Host → Motor | Change motor CAN ID |
+| 17 | Host ↔ Motor | Single parameter read |
+| 18 | Host → Motor | Single parameter write (volatile) |
+| 21 | Motor → Host | **Fault feedback** (extended fault + warning bitmasks) |
+| 22 | Host → Motor | Save parameters to flash |
+| 24 | Host → Motor | Enable / disable active reporting |
 
-### 3.3 Operation Control Mode (type 1)
+### 7.3 Operation Control Mode (type 1)
 
-Implements the control law:
+Control law: `t_ref = Kd × (v_set − v_actual) + Kp × (p_set − p_actual) + t_ff`
 
-```
-t_ref = Kd × (v_set − v_actual) + Kp × (p_set − p_actual) + t_ff
-```
+| Field | Physical range | 16-bit encoding |
+|---|---|---|
+| Position | −4π … +4π rad | 0 … 65535 |
+| Velocity | −44 … +44 rad/s | 0 … 65535 |
+| Kp | 0 … 500 | 0 … 65535 |
+| Kd | 0 … 5 | 0 … 65535 |
+| Torque | −17 … +17 N·m | 0 … 65535 |
 
-The torque feedforward (`t_ff`) is packed into **Data Area 2** of the 29-bit ID.
-The 8-byte payload carries position, velocity, Kp, Kd — each encoded as a
-16-bit unsigned integer over a physical range:
+### 7.4 Feedback Frame (type 2)
 
-| Field    | Physical range     | 16-bit range |
-|----------|--------------------|--------------|
-| Position | −4π … +4π rad      | 0 … 65535 |
-| Velocity | −44 … +44 rad/s    | 0 … 65535 |
-| Kp       | 0 … 500            | 0 … 65535 |
-| Kd       | 0 … 5              | 0 … 65535 |
-| Torque   | −17 … +17 N·m      | 0 … 65535 |
-
-Encoding formula:
-
-```python
-raw = int((x - x_min) / (x_max - x_min) * 65535)
-```
-
-### 3.4 Feedback Frame (type 2)
-
-The motor responds to every command with a type-2 frame.  It also pushes
-type-2 frames autonomously when **active reporting** is enabled (type 24).
-
-**29-bit ID layout of the response:**
+**29-bit ID layout:**
 
 ```
 bits 28–24  0x02
 bits 23–22  mode   (0=reset, 1=calibration, 2=run)
-bits 21–16  fault bitmask (6-bit subset — see type-21 for full bitmask)
+bits 21–16  fault bitmask (6-bit subset)
 bits 15–8   source motor CAN ID
 bits  7–0   host CAN ID
 ```
@@ -167,489 +249,483 @@ bits  7–0   host CAN ID
 **8-byte payload:**
 
 | Bytes | Content | Physical range |
-|-------|---------|----------------|
+|---|---|---|
 | 0–1 | position | −4π … +4π rad |
 | 2–3 | velocity | −V_MAX … +V_MAX rad/s |
-| 4–5 | torque   | −T_MAX … +T_MAX N·m |
+| 4–5 | torque | −T_MAX … +T_MAX N·m |
 | 6–7 | temperature × 10 | °C |
 
-### 3.5 Fault Feedback Frame (type 21)
-
-The motor pushes type-21 frames autonomously when a fault or warning condition
-changes.  This frame carries the **full** fault bitmask (32 bits) and a separate
-warning bitmask, providing more detail than the 6-bit subset in the type-2 ID.
-
-**8-byte payload:**
+### 7.5 Fault Feedback Frame (type 21)
 
 | Bytes | Content |
-|-------|---------|
-| 0–3 | Fault bitmask (uint32 LE) — see `FaultBit` enum |
-| 4–7 | Warning bitmask (uint32 LE) — see `WarnBit` enum |
+|---|---|
+| 0–3 | Fault bitmask (uint32 LE) |
+| 4–7 | Warning bitmask (uint32 LE) |
 
-**Fault bits (bytes 0–3):**
+**Fault bits:**
+
+| Bit | Name | Meaning |
+|---|---|---|
+| 0 | `OVER_TEMP` | Winding temp > 135 °C |
+| 1 | `DRIVER_IC` | Driver chip fault |
+| 2 | `UNDERVOLTAGE` | Bus voltage < 12 V |
+| 3 | `OVERVOLTAGE` | Bus voltage > 60 V |
+| 4 | `B_PHASE_OC` | B-phase overcurrent |
+| 5 | `C_PHASE_OC` | C-phase overcurrent |
+| 7 | `ENCODER_UNCAL` | Encoder not calibrated |
+| 8 | `HW_ID_FAULT` | Hardware ID mismatch |
+| 9 | `POS_INIT_FAULT` | Position init error |
+| 14 | `STALL_OVERLOAD` | Stall I²t overload |
+| 16 | `A_PHASE_OC` | A-phase overcurrent |
+
+**Warning bits:**
 
 | Bit | Meaning |
-|-----|---------|
-| 0 | Motor over-temperature (> 135 °C) |
-| 1 | Driver IC fault |
-| 2 | Under-voltage (< 12 V) |
-| 3 | Over-voltage (> 60 V) |
-| 4 | B-phase over-current |
-| 5 | C-phase over-current |
-| 7 | Encoder not calibrated |
-| 8 | Hardware ID fault |
-| 9 | Position init fault |
-| 14 | Stall / I²t overload |
-| 16 | A-phase over-current |
+|---|---|
+| 0 | Over-temperature warning (approaching 135 °C) |
 
-**Warning bits (bytes 4–7):**
+### 7.6 Parameter Read / Write (types 17 & 18)
 
-| Bit | Meaning |
-|-----|---------|
-| 0 | Motor over-temperature warning (approaching 135 °C threshold) |
+Common parameter indices (decimal):
 
-### 3.6 Parameter Read / Write (types 17 & 18)
-
-The motor exposes an object dictionary indexed by 16-bit function codes.
-See `ParamIndex` in `motor_base.py` for the full list.  Common ones:
-
-| Index  | Name          | Type   | Description |
-|--------|---------------|--------|-------------|
-| 0x2009 | motor_baud    | uint8  | Baud rate flag: 1=1Mbps 2=500Kbps 3=250Kbps 4=125Kbps (re-power required) |
-| 0x200A | CAN_ID        | uint8  | Motor CAN ID (0-127), effective immediately |
-| 0x200B | CAN_MASTER    | uint8  | Host CAN ID |
-| 0x7005 | run_mode      | uint8  | 0=OPERATION 1=POS_PP 2=VELOCITY 3=CURRENT 5=POS_CSP |
-| 0x7006 | iq_ref        | float  | Current mode Iq command (A) |
-| 0x700A | spd_ref       | float  | Velocity command (rad/s) |
-| 0x700B | limit_torque  | float  | Torque limit (N·m) |
-| 0x7016 | loc_ref       | float  | Position command (rad) |
-| 0x7017 | limit_spd     | float  | CSP speed limit (rad/s) |
-| 0x7019 | mechPos       | float  | Read-only: mechanical angle (rad) |
-| 0x701B | mechVel       | float  | Read-only: load velocity (rad/s) |
-| 0x701C | VBUS          | float  | Read-only: bus voltage (V) |
-
-Writes are volatile (lost on power-off) unless followed by a **type 22** (save) frame.
+| Index (hex) | Index (dec) | Name | Type | Description |
+|---|---|---|---|---|
+| 0x7005 | 28677 | run_mode | uint8 | 0=OPERATION 1=POS_PP 2=VELOCITY 3=CURRENT 5=POS_CSP |
+| 0x7006 | 28678 | iq_ref | float | Current mode Iq command (A) |
+| 0x700A | 28682 | spd_ref | float | Velocity command (rad/s) |
+| 0x700B | 28683 | limit_torque | float | Torque limit (N·m) |
+| 0x7016 | 28694 | loc_ref | float | Position command (rad) |
+| 0x7017 | 28695 | limit_spd | float | CSP speed limit (rad/s) |
+| 0x7018 | 28696 | limit_cur | float | Current limit (A) |
+| 0x7019 | 28697 | mechPos | float | Read-only: mechanical angle (rad) |
+| 0x701B | 28699 | mechVel | float | Read-only: load velocity (rad/s) |
+| 0x701C | 28700 | VBUS | float | Read-only: bus voltage (V) |
+| 0x200A | 8202 | CAN_ID | uint8 | Motor CAN ID (0-127) |
+| 0x2009 | 8201 | motor_baud | uint8 | Baud rate flag (1=1M 2=500K 3=250K 4=125K) |
 
 ---
 
-## 4. Software Architecture
+## 8. robstride_p — Motor Node
 
+Located at `ros_ws/src/robstride_p/`. Runs one ROS 2 node per motor group (left arm, right arm, base/neck).
+
+```bash
+ros2 launch robstride_p motors.launch.py config:=left_arm.toml
+ros2 launch robstride_p motors.launch.py config:=right_arm.toml
+ros2 launch robstride_p motors.launch.py config:=base_and_neck.toml
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     ROS 2 Node (motor_node.py)               │
-│  Topics / Services / Actions — robstride_p package           │
-└─────────────────────┬────────────────────────────────────────┘
-                      │ instantiates
-┌─────────────────────▼────────────────────────────────────────┐
-│            Motor classes  rs01.py … rs05.py                  │
-│          (RS01 … RS05 — motor-specific limits only)          │
-└─────────────────────┬────────────────────────────────────────┘
-                      │ inherits
-┌─────────────────────▼────────────────────────────────────────┐
-│           RobStrideMotorBase  (motor_base.py)                │
-│  Full private protocol: frame building, encode/decode,       │
-│  all control modes, parameter read/write, active reporting.  │
-│  _on_frame_received handles all incoming comm types and      │
-│  keeps _feedback current via threading.Event synchronisation │
-└─────────────────────┬────────────────────────────────────────┘
-                      │ uses
-┌─────────────────────▼────────────────────────────────────────┐
-│                  CANComms  (comms.py)                        │
-│  python-can wrapper: SocketCAN, hardware filters,            │
-│  Notifier thread + per-motor callback dispatch               │
-└─────────────────────┬────────────────────────────────────────┘
-                      │
-              SocketCAN (can0)
-                      │
-              CAN bus  ──────── RS01 ── RS02 ── RS03 …
-```
-
----
-
-## 5. comms.py — CAN Transport Layer
-
-`CANComms` wraps `python-can` and provides the transport for one or more
-motors sharing a physical CAN bus.
-
-### Hardware filters
-
-Each motor registered via `add_motor_filter(motor_id, callback)` installs a
-kernel-level receive filter:
-
-```
-accept frame if (arbitration_id >> 8) & 0xFF == motor_id
-```
-
-Frames for unregistered motors are dropped by the driver, not Python,
-keeping CPU load low.
-
-### Background listener and callback dispatch
-
-`start_listener()` must be called once before using any motor.  It starts a
-`can.Notifier` background thread that feeds `_MotorDispatcher`.  The dispatcher
-extracts the motor ID from bits 15–8 of the extended arbitration ID and calls
-the registered per-motor callback directly — no queues, no intermediate buffering.
-
-```
-Notifier thread
-    │
-    ▼
-_MotorDispatcher.on_message_received(msg)
-    └── motor._on_frame_received(msg)   ← handles all comm types, updates state
-```
-
-All frame parsing happens inside `_on_frame_received` in `motor_base.py`.
-For request-response exchanges (param read, device ID) the callback sets a
-`threading.Event` that the calling thread waits on.
-
----
-
-## 6. motor_base.py — Protocol Implementation
-
-`RobStrideMotorBase` contains the complete private-protocol implementation.
-Motor subclasses override only four class attributes:
-
-```python
-class RS03(RobStrideMotorBase):
-    V_MIN: float = -21.0   # rad/s
-    V_MAX: float =  21.0
-    T_MIN: float = -60.0   # N·m
-    T_MAX: float =  60.0
-    MAX_CURRENT_A: float = 43.0
-```
-
-### Frame handler
-
-`_on_frame_received` is the single entry-point for all incoming frames.
-It is called by `_MotorDispatcher` in the Notifier background thread:
-
-| Comm type | Action |
-|-----------|--------|
-| 2 (MOTOR_FEEDBACK) | Decode and replace `_feedback` |
-| 21 (FAULT_FEEDBACK) | Update `_feedback.fault` and `_feedback.warning` |
-| 17 (PARAM_READ reply) | Store raw bytes, set `_param_event` |
-| 0 (GET_DEVICE_ID reply) | Store raw bytes, set `_device_id_event` |
-
-Because the callback fires in the Notifier thread, `motor.feedback` is always
-current regardless of what the calling thread is doing.
-
-### Control modes
-
-| RunMode | Value | How to use |
-|---------|-------|------------|
-| OPERATION | 0 | `set_operation_control(position, velocity, torque_ff, kp, kd)` |
-| POSITION_PP | 1 | `set_position_pp(position_rad, speed_rad_s, acceleration_rad_s2)` |
-| VELOCITY | 2 | `set_velocity(velocity_rad_s)` |
-| CURRENT | 3 | `set_current(iq_ref_a)` |
-| POSITION_CSP | 5 | `set_position_csp(position_rad, speed_limit_rad_s)` |
-
-Mode must be set **while the motor is disabled**.
-
-### Typical command sequence
-
-```python
-motor.set_run_mode(RunMode.VELOCITY)   # 1. set mode (motor stopped)
-motor.enable()                          # 2. enable (type 3)
-motor.set_velocity(2.0)                 # 3. command
-motor.disable()                         # 4. stop (type 4)
-```
-
-### Active reporting
-
-Active reporting is **off by default**.  Enable it via the `~/set_active_report`
-ROS 2 service (or by calling `motor.enable_active_report()` directly).  When
-active, the motor pushes type-2 frames at the configured rate without waiting
-for a command, and `motor.feedback` is updated automatically by the callback.
-
----
-
-## 7. Motor Classes RS01–RS05
-
-Each file (`rs01.py` … `rs05.py`) is a thin subclass that sets the physical
-limits and re-exports the shared enumerations for convenience.
-
-| Class | T_MAX | V_MAX  | MAX_CURRENT_A | Decel ratio |
-|-------|-------|--------|---------------|-------------|
-| RS01  | 17 N·m | 33 rad/s | 23 A | 7.75:1 |
-| RS02  | 17 N·m | 44 rad/s | 23 A | 7.75:1 |
-| RS03  | 60 N·m | 21 rad/s | 43 A | 9:1 |
-| RS04  | 120 N·m | 21 rad/s | 90 A | 9:1 |
-| RS05  | 6 N·m  | 50 rad/s | 11 A | 7.75:1 |
-
-All motors share: P_MIN = −4π rad, P_MAX = +4π rad, KP_MAX = 500, KD_MAX = 5.
-
----
-
-## 8. ROS 2 Package — robstride_p
-
-Located at `ros_ws/src/robstride_p/`.
 
 ### 8.1 config.toml
 
-All motor configuration lives in one TOML file.  The `[defaults]` section is
-**required**; the node exits with a fatal error if it is absent.
-
 ```toml
 [defaults]
-node_name                   = "motor_node"  # ROS 2 node name
-use_node_name_as_topic_base = true          # false → topics at root namespace
-master_id                   = 253           # host CAN ID (0xFD)
-channel                     = "can0"        # SocketCAN interface
+node_name                   = "left_arm"
+use_node_name_as_topic_base = true
+master_id                   = 253
+channel                     = "can2"
 bustype                     = "socketcan"
 bitrate                     = 1000000
-rx_timeout                  = 0.05          # seconds — used for param read timeout
-active_report_interval_ms   = 10            # fallback interval for set_active_report (hz=0)
-update_rate_hz              = 100.0         # feedback publish rate
+rx_timeout                  = 0.05
+active_report_interval_ms   = 10
+update_rate_hz              = 30.0
 
-[left_hip]
-type     = "RS04"
-motor_id = 1
-
-[right_hip]
-type     = "RS04"
-motor_id = 2
-
-[left_knee]
-type     = "RS03"
-motor_id = 3
-# override a single default for this motor only:
-channel  = "can1"
+[SpL]
+type              = "RS04"
+motor_id          = 32
+joint_limit_min   = -2.6114   # motor frame (rad)
+joint_limit_max   =  2.6210   # motor frame (rad)
+motor_homing_pos  =  0.0047   # motor frame (rad)
+max_torque        = 120.0
+max_current       =  90.0
 ```
 
-Each motor section may override any `[defaults]` field.  Motors that share
-the same `(channel, bustype, bitrate)` tuple reuse one `CANComms` instance.
+Each motor section may override any `[defaults]` field. Motors sharing the same `(channel, bustype, bitrate)` reuse one `CANComms` instance.
 
-`node_name` is read **before** the ROS 2 node is constructed (via a short-lived
-temporary node) so it can be passed to `Node.__init__()`.
+`use_node_name_as_topic_base = true` → topics under `/{node_name}/` (e.g. `/left_arm/joint_states`).
 
-**Topic namespace control:**
-- `use_node_name_as_topic_base = true` (default): topics live under `/{node_name}/` — e.g. `/motor_node/joint_states`
-- `use_node_name_as_topic_base = false`: topics are at the root namespace — e.g. `/joint_states`
+### 8.2 Joint Limits & Homing
 
-All examples below use `~` notation (`~/topic` = `/{node_name}/topic`).
+All positions in this codebase are in a single **motor frame** — the absolute mechanical angle reported by the motor encoder.
 
-**Active reporting** is disabled by default.  Use the `~/set_active_report`
-service to enable it per-motor or for all motors.  `active_report_interval_ms`
-in `[defaults]` is the fallback interval used when the service is called with
-`hz = 0`.
+| Config field | Frame | Meaning |
+|---|---|---|
+| `motor_homing_pos` | motor frame | Absolute motor angle when the arm is at its home pose |
+| `joint_limit_min` | motor frame | Lower position bound |
+| `joint_limit_max` | motor frame | Upper position bound |
+| `fb.position` / `MECH_POS` | motor frame | Motor's current absolute angle |
 
-### 8.2 Topics
+**Commands** arrive relative to the homing point (zero = home). The node converts them to motor frame before use:
+
+```
+motor_frame_position = command_relative_to_home + motor_homing_pos
+```
+
+**`calibrate_joint_limits`** runs at startup for every motor that has limits configured. It reads `MECH_POS` from the motor and checks whether it falls within `[joint_limit_min, joint_limit_max]`. If not, all three values (`min`, `max`, `motor_homing_pos`) are shifted by ±2π together to bring the current position inside the window:
+
+```python
+if mech_pos > joint_limit_max:
+    joint_limit_max    += 2π
+    joint_limit_min    += 2π
+    motor_homing_pos   += 2π
+elif mech_pos < joint_limit_min:
+    joint_limit_max    -= 2π
+    joint_limit_min    -= 2π
+    motor_homing_pos   -= 2π
+```
+
+This handles the fact that the encoder wraps across power cycles and the stored limits may be offset by one full rotation.
+
+### 8.3 Command Flow
+
+For position commands (PP and CSP):
+
+1. **Transform** relative command to motor frame: `motor_pos = cmd + motor_homing_pos`
+2. **Check** `motor_pos` against motor-frame limits (`joint_limit_min` / `joint_limit_max`)
+3. **Reject** (log error, drop command) if out of bounds
+4. **Send** `motor_pos` to hardware
+
+For velocity commands, `fb.position` (motor frame) is compared directly against the motor-frame limits. Velocity is zeroed if the motor is at a boundary and moving toward it.
+
+### 8.4 Topics
 
 | Topic | Type | Description |
-|-------|------|-------------|
+|---|---|---|
 | `~/joint_states` | `sensor_msgs/JointState` | All motors combined, at `update_rate_hz` |
-| `~/motors/{name}/state` | `custom_interfaces/MotorState` | Per-motor state (position, velocity, torque, temperature, mode, fault, enabled) |
-| `~/motors/{name}/fault` | `custom_interfaces/MotorFault` | Per-motor decoded fault and warning bits — published **only on change** |
-| `~/motors/{name}/command` | `custom_interfaces/MotorCommand` | Subscribe to send commands |
+| `~/motors/{name}/state` | `custom_interfaces/MotorState` | Per-motor full state |
+| `~/motors/{name}/fault` | `custom_interfaces/MotorFault` | Per-motor fault — published **only on change** |
+| `~/motors/{name}/cmd_position_pp` | `custom_interfaces/PositionPPCommand` | PP position command |
+| `~/motors/{name}/cmd_position_csp` | `custom_interfaces/PositionCSPCommand` | CSP position command |
+| `~/motors/{name}/cmd_velocity` | `custom_interfaces/VelocityCommand` | Velocity command |
+| `~/motors/{name}/cmd_current` | `custom_interfaces/CurrentCommand` | Current command |
 
-**Sending a command:**
+### 8.5 Services
 
-```bash
-# velocity command
-ros2 topic pub /motor_node/motors/left_hip/command \
-  custom_interfaces/msg/MotorCommand \
-  '{name: left_hip, command_type: velocity, value: 2.0}'
-
-# operation control (MIT-style)
-ros2 topic pub /motor_node/motors/left_hip/command \
-  custom_interfaces/msg/MotorCommand \
-  '{name: left_hip, command_type: operation, position: 1.57, velocity: 0.0, kp: 30.0, kd: 1.0, torque_ff: 0.0}'
-```
-
-`command_type` values: `position` | `velocity` | `current` | `torque` | `operation`
-
-For `position`, `velocity`, `current`, `torque` — the `value` field carries the scalar.
-For `operation` — use the full `position`, `velocity`, `kp`, `kd`, `torque_ff` fields.
-
-**Note:** The node tracks each motor's current run mode.  A command whose
-`command_type` does not match the motor's active mode is rejected with a
-logged error (e.g. sending `velocity` while the motor is in `POSITION_CSP`
-mode).  Set the correct mode first with `~/set_run_mode`.
-
-### 8.3 Services
-
-Services that accept a `name` field support `"all"` to apply to every motor
-simultaneously — except `read_param` and `get_can_config`, which return a
-single value.
+Services that accept a `name` field support `"all"` to apply to every motor simultaneously (except `read_param` and `get_can_config`, which return a single value).
 
 | Service | Type | `"all"` | Description |
-|---------|------|---------|-------------|
-| `~/enable_motor` | `EnableMotor` | ✅ | Enable or stop motors; optionally clear faults |
+|---|---|---|---|
+| `~/enable_motor` | `EnableMotor` | ✅ | Enable or stop motors; `clear_fault=true` clears latched faults |
 | `~/set_run_mode` | `SetRunMode` | ✅ | Switch control mode (motor must be stopped first) |
 | `~/set_zero_position` | `SetZeroPosition` | ✅ | Set current position as mechanical zero |
 | `~/read_param` | `ReadParam` | ❌ | Read a parameter by function code index |
 | `~/write_param` | `WriteParam` | ✅ | Write a parameter; `persist=true` saves to flash |
-| `~/help` | `Help` | — | List all parameter codes, names, types, access, descriptions |
+| `~/help` | `Help` | — | List all parameter codes with names and types |
 | `~/get_can_config` | `GetCanConfig` | ❌ | Read CAN ID and baud rate from motor firmware |
 | `~/set_can_config` | `SetCanConfig` | ✅ | Change CAN ID (immediate) and/or baud rate (re-power) |
-| `~/set_active_report` | `SetActiveReport` | ✅ | Enable or disable autonomous status reporting |
+| `~/set_active_report` | `SetActiveReport` | ✅ | Enable or disable autonomous state reporting |
 | `~/homing` | `std_srvs/Trigger` | — | Stop all motors then command position 0.0 via CSP |
 | `~/stop_all` | `std_srvs/Trigger` | — | Immediately disable every motor |
 
-**Examples:**
+**Common examples:**
 
 ```bash
-# Enable a single motor
-ros2 service call /motor_node/enable_motor custom_interfaces/srv/EnableMotor \
-  '{name: left_hip, enable: true}'
+# Enable / disable
+ros2 service call /left_arm/enable_motor custom_interfaces/srv/EnableMotor \
+  '{name: SpL, enable: true}'
 
-# Enable all motors at once
-ros2 service call /motor_node/enable_motor custom_interfaces/srv/EnableMotor \
+# Enable all motors on an arm
+ros2 service call /right_arm/enable_motor custom_interfaces/srv/EnableMotor \
   '{name: all, enable: true}'
 
-# Set run mode to velocity on all motors
-ros2 service call /motor_node/set_run_mode custom_interfaces/srv/SetRunMode \
+# Set velocity mode on all motors
+ros2 service call /left_arm/set_run_mode custom_interfaces/srv/SetRunMode \
   '{name: all, mode: 2}'
 
-# Read mechanical position (0x7019 = 28697 decimal)
-ros2 service call /motor_node/read_param custom_interfaces/srv/ReadParam \
-  '{name: left_hip, index: 28697}'
+# Read current limit (0x7018 = 28696)
+ros2 service call /right_arm/read_param custom_interfaces/srv/ReadParam \
+  '{name: WwR, index: 28696}'
 
-# Write CSP speed limit and persist to flash (0x7017 = 28695 decimal)
-ros2 service call /motor_node/write_param custom_interfaces/srv/WriteParam \
-  '{name: left_hip, index: 28695, value: 5.0, persist: true}'
+# Read mechanical position (0x7019 = 28697)
+ros2 service call /right_arm/read_param custom_interfaces/srv/ReadParam \
+  '{name: WwR, index: 28697}'
 
-# List all parameters containing "velocity"
-ros2 service call /motor_node/help custom_interfaces/srv/Help \
-  '{filter: velocity}'
-
-# Read CAN ID and baud rate from a motor
-ros2 service call /motor_node/get_can_config custom_interfaces/srv/GetCanConfig \
-  '{name: left_hip}'
-
-# Change CAN ID only (immediate effect)
-ros2 service call /motor_node/set_can_config custom_interfaces/srv/SetCanConfig \
-  '{name: left_hip, can_id: 5, baud_flag: 0}'
-
-# Change baud rate to 500 Kbps (re-power required)
-ros2 service call /motor_node/set_can_config custom_interfaces/srv/SetCanConfig \
-  '{name: left_hip, can_id: 0, baud_flag: 2}'
-
-# Enable active reporting at 100 Hz on all motors
-ros2 service call /motor_node/set_active_report custom_interfaces/srv/SetActiveReport \
-  '{name: all, enable: true, hz: 100.0}'
-
-# Disable active reporting on one motor
-ros2 service call /motor_node/set_active_report custom_interfaces/srv/SetActiveReport \
-  '{name: left_hip, enable: false, hz: 0.0}'
+# Enable active reporting at 30 Hz
+ros2 service call /left_arm/set_active_report custom_interfaces/srv/SetActiveReport \
+  '{name: all, enable: true, hz: 30.0}'
 
 # Emergency stop
-ros2 service call /motor_node/stop_all std_srvs/srv/Trigger
-
-# Home all motors to position 0.0
-ros2 service call /motor_node/homing std_srvs/srv/Trigger
+ros2 service call /right_arm/stop_all std_srvs/srv/Trigger
 ```
 
-**Baud flag values for `get_can_config` / `set_can_config`:**
-
-| `baud_flag` | Rate | Notes |
-|-------------|------|-------|
-| 1 | 1 Mbps | Default |
-| 2 | 500 Kbps | |
-| 3 | 250 Kbps | |
-| 4 | 125 Kbps | |
-
-CAN ID changes take effect immediately.
-Baud rate changes are saved to flash and take effect after re-powering the motor.
-
-**`set_active_report` fields:**
-- `name` — motor name or `"all"`
-- `enable` — `true` to start reporting, `false` to stop
-- `hz` — reporting rate in Hz (minimum ~100 Hz = 10 ms interval); `0.0` uses `active_report_interval_ms` from config.toml
-
-### 8.4 Actions
+### 8.6 Actions
 
 | Action | Type | Description |
-|--------|------|-------------|
-| `~/move_to_position` | `MoveToPosition` | Move to a target position; succeeds when within `tolerance` rad |
-| `~/set_velocity` | `SetVelocity` | Run at a velocity for `duration` seconds (0 = until cancelled) |
-
-**Move to position:**
+|---|---|---|
+| `~/move_to_position` | `MoveToPosition` | Move to target position; succeeds when within `tolerance` rad |
+| `~/set_velocity` | `SetVelocity` | Run at velocity for `duration` seconds (0 = until cancelled) |
 
 ```bash
-ros2 action send_goal /motor_node/move_to_position \
+ros2 action send_goal /left_arm/move_to_position \
   custom_interfaces/action/MoveToPosition \
-  '{name: left_knee, target_position: 1.57, speed_limit: 2.0, tolerance: 0.05, timeout: 10.0}'
+  '{name: SpL, target_position: 0.5, speed_limit: 2.0, tolerance: 0.05, timeout: 10.0}'
 ```
 
-Feedback publishes `current_position`, `position_error`, `elapsed_time` at 100 Hz.
-The motor holds the target position (CSP mode, motor stays enabled) on success.
+Motor holds the target position (CSP, stays enabled) on success.
 
-**Set velocity:**
+### 8.7 Fault Detection & Recovery
+
+**Check:** `~/motors/{name}/fault` publishes a `MotorFault` message whenever the fault bitmask changes. `MotorState.fault` also carries the raw bitmask on every state message.
+
+**Recover:**
+```bash
+# 1. Disable and clear fault
+ros2 service call /right_arm/enable_motor custom_interfaces/srv/EnableMotor \
+  "{name: WwR, enable: false, clear_fault: true}"
+
+# 2. Re-enable
+ros2 service call /right_arm/enable_motor custom_interfaces/srv/EnableMotor \
+  "{name: WwR, enable: true, clear_fault: false}"
+```
+
+`clear_fault=true` sends a Type-4 CAN frame with `payload[0] = 0x01`, which clears latched fault flags in the motor firmware.
+
+**Fault types and likely causes:**
+
+| Fault | Likely cause |
+|---|---|
+| `OVER_TEMP` | Too much current/load, or poor cooling. Clears when temp drops. |
+| `UNDERVOLTAGE` | Supply sag, high cable resistance, or too many motors on one supply. |
+| `OVERVOLTAGE` | Regenerative braking energy with no sink. |
+| `A/B/C_PHASE_OC` | Aggressive acceleration, short circuit. May need power cycle. |
+| `STALL_OVERLOAD` | Mechanical blockage or sustained torque beyond I²t limit. |
+| `ENCODER_UNCAL` | First power-on after factory reset — run calibration. |
+| `DRIVER_IC` | Driver chip fault — may need power cycle. |
+
+---
+
+## 9. mimic — Arm Mirroring
+
+See [`ros_ws/src/mimic/README.md`](ros_ws/src/mimic/README.md) for the full reference.
+
+Mirrors one arm's positions onto the other in real time, applying per-joint transforms. Direction is runtime-switchable without restarting the node.
 
 ```bash
-ros2 action send_goal /motor_node/set_velocity \
-  custom_interfaces/action/SetVelocity \
-  '{name: left_hip, target_velocity: 3.0, duration: 5.0, current_limit: 20.0, deceleration: 10.0}'
+ros2 launch mimic mimic.launch.py
+# Custom config
+ros2 launch mimic mimic.launch.py config:=/path/to/mimic.toml
 ```
 
-Velocity is ramped to 0 (using `deceleration` if provided, else `acceleration`) when
-duration expires or the goal is cancelled.
+**Config summary (`mimic/config/mimic.toml`):**
 
-### 8.5 Custom Interfaces
+```toml
+mode             = "pp"
+debug            = false
+left_arm_node_prefix  = "/left_arm"
+right_arm_node_prefix = "/right_arm"
+target_node      = "right_arm"   # "right_arm" → left mirrors to right; "left_arm" → right mirrors to left
+motors = ["Sp", "Sr", "Sw", "Ep", "Ww", "Wp", "Wr"]
 
-Package: `custom_interfaces` (`ros_ws/src/custom_interfaces/`)
+[transform_map]          # applied when target_node = "right_arm" (left → right)
+Sp = "negate"
 
-**Messages** (`msg/`):
+[inverse_transform_map]  # applied when target_node = "left_arm" (right → left)
+Sp = "negate"
+```
+
+**Services:**
+
+| Service | Type | Description |
+|---|---|---|
+| `~/switch_target` | `SetMimicTarget` | Switch which arm is the target (`"left_arm"` or `"right_arm"`) without restart |
+| `~/set_mode` | `SetMimicMode` | Change control mode (`"pp"` or `"csp"`) |
+| `~/set_params` | `SetMimicParams` | Update PP/CSP motion parameters at runtime |
+| `~/enable_motors` | `EnableMimicMotors` | Enable or disable target motors; supports `clear_fault` |
+
+```bash
+# Switch mimic direction to left arm as target
+ros2 service call /mimic_node/switch_target \
+  custom_interfaces/srv/SetMimicTarget "{target: 'left_arm'}"
+```
+
+**`debug = true`** — commands go to `~/mimic/debug/motors/{name}/cmd_*` instead of real motor topics. Motors are not enabled in debug mode.
+
+---
+
+## 10. trajectory_tracker — Record & Replay
+
+See [`ros_ws/src/trajectory_tracker/README.md`](ros_ws/src/trajectory_tracker/README.md) for the full reference.
+
+Records arm motor states to CSV and replays them, with full cross-arm direction matrix and per-joint transforms.
+
+```bash
+ros2 launch trajectory_tracker trajectory_tracker.launch.py
+```
+
+**Key config fields (`trajectory_tracker/config/config.toml`):**
+
+```toml
+left_arm_motors   = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
+right_arm_motors  = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
+replay_motor_mode = "pp"
+
+[motor_map]      # determines recording arm (keys) and replay arm (values)
+SpL = "SpR"      # left arm records → right arm replays
+
+[transform_map]          # left → right; keys are base names (no L/R)
+Sp = "negate"
+
+[inverse_transform_map]  # right → left
+Sp = "negate"
+```
+
+### Record
+
+```bash
+# Record left arm only
+ros2 action send_goal /trajectory_tracker/record_trajectory \
+  custom_interfaces/action/RecordTrajectory \
+  "{trajectory_name: 'demo', left_arm_source: true, right_arm_source: false}"
+
+# Stop recording (or cancel the action)
+ros2 service call /trajectory_tracker/stop_trajectory_recording \
+  custom_interfaces/srv/StopTrajectoryRecording
+```
+
+### Replay direction matrix
+
+| `replay_left_arm` | `replay_right_arm` | CSV recorded from | Result |
+|---|---|---|---|
+| true | false | left | left→left, passthrough |
+| false | true | left | left→right, forward transform |
+| true | false | right | right→left, inverse transform |
+| false | true | right | right→right, passthrough |
+| true | true | left | left→left + left→right simultaneously |
+| true | true | right | right→right + right→left simultaneously |
+| true | true | both | left→left + right→right simultaneously |
+
+```bash
+# Replay left arm recording onto right arm
+ros2 action send_goal /trajectory_tracker/replay_trajectory \
+  custom_interfaces/action/ReplayTrajectory \
+  "{trajectory_name: 'demo', replay_hz: 0.0, target_mode: 'pp', \
+    replay_left_arm: false, replay_right_arm: true, \
+    step_through: false, step_pct: 0.0, \
+    pp_speed: 0.0, pp_acceleration: 0.0, pp_deceleration: 0.0, pp_torque_limit: 0.0, \
+    csp_speed_limit: 0.0, csp_current_limit: 0.0}"
+```
+
+Motors are left **enabled and holding last pose** on all exit paths (normal completion, fault, cancel).
+
+### Services
+
+| Service | Type | Description |
+|---|---|---|
+| `~/pause_resume_replay` | `Trigger` | Toggle pause/resume of active replay |
+| `~/stop_trajectory_recording` | `StopTrajectoryRecording` | Stop active recording |
+| `~/record_arm_pose` | `RecordArmPose` | Snapshot current arm state to CSV |
+| `~/set_arm_pose` | `SetArmPose` | Load pose CSV and send commands to an arm |
+| `~/capture_homing_pose` | `CaptureHomingPose` | Read current positions into a homing TOML file |
+| `~/trim_trajectory` | `TrimTrajectory` | Remove timestamp ranges from a trajectory CSV |
+
+### Actions
+
+| Action | Type | Description |
+|---|---|---|
+| `~/record_trajectory` | `RecordTrajectory` | Record to CSV until cancelled or stop service called |
+| `~/replay_trajectory` | `ReplayTrajectory` | Replay CSV with direction matrix and transforms |
+| `~/homing` | `Homing` | Move motors to positions defined in a homing TOML |
+| `~/simulate_trajectory` | `SimulateTrajectory` | Publish CSV frames as `JointCommand` without motor commands |
+
+---
+
+## 11. custom_interfaces
+
+Package: `ros_ws/src/custom_interfaces/`
+
+**Messages:**
 
 | Message | Key fields |
-|---------|------------|
+|---|---|
 | `MotorState` | `name`, `position`, `velocity`, `torque`, `temperature`, `mode`, `fault`, `enabled` |
-| `MotorCommand` | `name`, `command_type`, `value`, `position`, `velocity`, `torque_ff`, `kp`, `kd` |
-| `MotorFault` | `name`, `fault_code`, `warning_code`, decoded per-bit booleans for faults and `over_temp_warning` |
+| `MotorFault` | `name`, `fault_code`, `warning_code`, decoded per-bit booleans (`over_temp`, `driver_ic`, `undervoltage`, `overvoltage`, `b_phase_oc`, `c_phase_oc`, `encoder_uncal`, `hw_id_fault`, `pos_init_fault`, `stall_overload`, `a_phase_oc`, `over_temp_warning`) |
+| `PositionPPCommand` | `name`, `position`, `speed`, `acceleration`, `deceleration`, `torque_limit` |
+| `PositionCSPCommand` | `name`, `position`, `speed_limit`, `current_limit` |
+| `VelocityCommand` | `name`, `velocity`, `current_limit` |
+| `JointCommand` | Joint-level command for simulation / visualisation |
 
-**Services** (`srv/`): `EnableMotor`, `SetRunMode`, `SetZeroPosition`, `ReadParam`, `WriteParam`, `Help`, `GetCanConfig`, `SetCanConfig`, `SetActiveReport`
+**Services:**
 
-**Actions** (`action/`): `MoveToPosition`, `SetVelocity`
+| Service | Description |
+|---|---|
+| `EnableMotor` | Enable / disable with optional `clear_fault` |
+| `SetRunMode` | Set control mode |
+| `SetZeroPosition` | Set mechanical zero |
+| `ReadParam` | Read parameter by index |
+| `WriteParam` | Write parameter with optional flash persist |
+| `Help` | List parameter codes |
+| `GetCanConfig` / `SetCanConfig` | CAN ID and baud rate management |
+| `SetActiveReport` | Enable / disable autonomous state reporting |
+| `SetMimicTarget` | Switch mimic direction (`left_arm` / `right_arm`) |
+| `SetMimicMode` | Change mimic control mode |
+| `SetMimicParams` | Update mimic PP/CSP parameters |
+| `EnableMimicMotors` | Enable / disable mimic target motors |
+| `StopTrajectoryRecording` | Stop active recording |
+| `RecordArmPose` / `SetArmPose` | Pose capture and playback |
+| `CaptureHomingPose` | Write homing positions to TOML |
+| `TrimTrajectory` | Edit trajectory CSV in-place |
 
----
+**Actions:**
 
-## 9. Build & Run
-
-### Prerequisites
-
-```bash
-# ROS 2 (Jazzy or compatible)
-sudo apt install ros-${ROS_DISTRO}-ros-base
-
-# python-can
-pip install python-can
-
-# SocketCAN utilities
-sudo apt install can-utils
-```
-
-### Build
-
-```bash
-cd claude/ros_ws
-colcon build
-source install/setup.bash
-```
-
-### Launch
-
-```bash
-# Default config
-ros2 launch robstride_p motors.launch.py
-
-# Custom config file
-ros2 launch robstride_p motors.launch.py config:=/path/to/my_config.toml
-```
-
-### CAN interface setup (one-time per boot)
-
-```bash
-sudo ip link set can0 type can bitrate 1000000
-sudo ip link set can0 up
-# Verify
-ip link show can0
-candump can0   # live frame monitor
-```
+| Action | Description |
+|---|---|
+| `MoveToPosition` | Move to position with tolerance |
+| `SetVelocity` | Run at velocity for duration |
+| `RecordTrajectory` | Record arm states to CSV |
+| `ReplayTrajectory` | Replay CSV with direction matrix |
+| `Homing` | Move to stored home positions |
+| `SimulateTrajectory` | Publish CSV frames without motor commands |
 
 ---
 
-## 10. Standalone Usage (no ROS 2)
+## 12. Software Architecture
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│               mimic_node.py                                       │
+│  Subscribes source arm state → applies transforms → publishes    │
+│  position commands to target arm at op_hz or on every state msg  │
+└───────────────────────────────────────────────────────────────────┘
+         ▲ state topics                  │ cmd_position_pp/csp topics
+         │                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│               trajectory_tracker_node.py                                │
+│  record_trajectory: CSV ← motor states                                 │
+│  replay_trajectory: CSV → position commands (with cross-arm transforms)│
+└─────────────────────────────────────────────────────────────────────────┘
+         ▲ state topics                  │ cmd_position_pp/csp topics
+         │                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│               motor_node.py  (one per arm / body segment)        │
+│  calibrate_joint_limits → check limits in motor frame            │
+│  transform cmd (+ homing_pos) → check → send to hardware         │
+└─────────────────────┬────────────────────────────────────────────┘
+                      │ instantiates
+┌─────────────────────▼────────────────────────────────────────────┐
+│            Motor classes  rs01.py … rs05.py                      │
+└─────────────────────┬────────────────────────────────────────────┘
+                      │ inherits
+┌─────────────────────▼────────────────────────────────────────────┐
+│           RobStrideMotorBase  (motor_base.py)                    │
+│  Full private protocol, all control modes, parameter read/write, │
+│  active reporting, fault handling                                │
+└─────────────────────┬────────────────────────────────────────────┘
+                      │ uses
+┌─────────────────────▼────────────────────────────────────────────┐
+│                  CANComms  (comms.py)                            │
+│  python-can wrapper, SocketCAN, hardware filters,                │
+│  Notifier thread + per-motor callback dispatch                   │
+└─────────────────────┬────────────────────────────────────────────┘
+                      │
+              SocketCAN  (can0 / can1 / can2)
+                      │
+    ┌─────────────────┴──────────────────────────────────┐
+    │  can0: base/neck    can1: right arm    can2: left arm
+    └────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13. Standalone Usage (no ROS 2)
 
 All driver files are plain Python — no ROS 2 required.
 
@@ -659,88 +735,47 @@ from rs04 import RS04
 from rs02 import RS02
 from motor_base import RunMode
 
-with CANComms("can0") as bus:
-    bus.start_listener()            # start Notifier background thread
+with CANComms("can1") as bus:
+    bus.start_listener()
 
-    hip  = RS04(motor_id=1, comms=bus)
-    knee = RS02(motor_id=3, comms=bus)
+    hip   = RS04(motor_id=16, comms=bus)
+    wrist = RS02(motor_id=20, comms=bus)
 
-    # Enable active reporting at 100 Hz — _feedback updated automatically
     hip.enable_active_report(enable=True, interval_ms=10)
-    knee.enable_active_report(enable=True, interval_ms=10)
 
-    # Velocity mode on hip
-    hip.set_run_mode(RunMode.VELOCITY)
+    hip.set_run_mode(RunMode.POSITION_CSP)
     hip.enable()
-    hip.set_velocity(2.0)           # 2 rad/s
-
-    # CSP position on knee
-    knee.set_run_mode(RunMode.POSITION_CSP)
-    knee.enable()
-    knee.set_position_csp(1.57, speed_limit_rad_s=3.0)
+    hip.set_position_csp(0.5, speed_limit_rad_s=3.0)
 
     import time
     for _ in range(100):
-        print(hip.feedback, knee.feedback)   # always current via callback
+        print(hip.feedback)
         time.sleep(0.01)
 
     hip.disable()
-    knee.disable()
 ```
 
-**Multiple motors on separate buses:**
+**Reading parameters:**
 
 ```python
-with CANComms("can0") as bus0, CANComms("can1") as bus1:
-    bus0.start_listener()
-    bus1.start_listener()
-    m1 = RS04(motor_id=1, comms=bus0)
-    m2 = RS03(motor_id=1, comms=bus1)   # same CAN ID, different bus — fine
-```
-
-**Reading a parameter:**
-
-```python
-# Blocking call — waits up to rx_timeout for the reply frame via threading.Event
-pos = motor.read_mech_pos()   # rad
-vel = motor.read_mech_vel()   # rad/s
-vbus = motor.read_vbus()      # V
+mech_pos = motor.read_param_float(ParamIndex.MECH_POS)   # absolute motor-frame angle
+cur_limit = motor.read_param_float(ParamIndex.LIMIT_CUR)  # current limit (A)
 ```
 
 **Saving parameters to flash:**
 
 ```python
-motor.write_param_float(ParamIndex.LOC_KP, 50.0)
+motor.write_param_float(ParamIndex.LIMIT_CUR, 15.0)
 motor.save_params()   # type 22 — survives power-off
 ```
 
----
+**Check and clear a fault:**
 
-## File Structure
-
-```
-claude/
-└── ros_ws/
-    └── src/
-        ├── custom_interfaces/          ROS 2 msgs, srvs, actions
-        │   ├── msg/
-        │   │   MotorState.msg
-        │   │   MotorCommand.msg
-        │   │   MotorFault.msg
-        │   ├── srv/
-        │   │   EnableMotor.srv         SetRunMode.srv  SetZeroPosition.srv
-        │   │   ReadParam.srv           WriteParam.srv  Help.srv
-        │   │   GetCanConfig.srv        SetCanConfig.srv
-        │   │   SetActiveReport.srv
-        │   └── action/
-        │       MoveToPosition.action   SetVelocity.action
-        └── robstride_p/                ROS 2 Python package
-            ├── config/config.toml
-            ├── launch/motors.launch.py
-            ├── docs/                   RS01–RS05 user manuals (PDF)
-            └── robstride_p/
-                ├── comms.py            CAN transport (CANComms, _MotorDispatcher)
-                ├── motor_base.py       Protocol base class, enums, MotorFeedback
-                ├── rs01.py … rs05.py   Motor subclasses (limits only)
-                └── motor_node.py       ROS 2 node
+```python
+fb = motor.feedback
+if fb.fault != 0:
+    print(f"Fault bitmask: {fb.fault:#010x}")
+    motor.disable(clear_fault=True)   # Type-4 frame with payload[0]=0x01
+    time.sleep(0.1)
+    motor.enable()
 ```
