@@ -36,6 +36,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StopTrajectoryRecording.srv"
   "srv/TrimTrajectory.srv"
   "srv/EnableMimicMotors.srv"
+  "srv/SetMimicTarget.srv"
   # Actions
   "action/MoveToPosition.action"
   "action/SetVelocity.action"

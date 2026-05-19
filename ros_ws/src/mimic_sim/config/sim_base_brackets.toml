@@ -1,0 +1,24 @@
+[defaults]
+node_name                   = "base_brackets"
+use_node_name_as_topic_base = true
+update_rate_hz              = 100.0
+
+sim_joint_states_topic = "/joint_states"
+sim_controller_topic   = "/base_bracket_controller/joint_trajectory"
+sim_controller_type    = "trajectory"
+trajectory_time_sec    = 0.05
+
+[BwR]
+joint_limit_min  = -1.570796
+joint_limit_max  =  1.570796
+motor_homing_pos =  0.0
+
+[BwL]
+joint_limit_min  = -1.570796
+joint_limit_max  =  1.570796
+motor_homing_pos =  0.0
+
+[BwC]
+joint_limit_min  = -1.570796
+joint_limit_max  =  1.570796
+motor_homing_pos =  0.0

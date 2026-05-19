@@ -1,0 +1,10 @@
+<library path="featherbot_ros2_control">
+  <class
+    name="featherbot_ros2_control/FeatherbotHardwareInterface"
+    type="featherbot_ros2_control::FeatherbotHardwareInterface"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Hardware interface for Featherbot joints via RobStride motors.
+    </description>
+  </class>
+</library>

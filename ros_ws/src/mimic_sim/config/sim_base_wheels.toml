@@ -1,0 +1,19 @@
+[defaults]
+node_name                   = "base_wheels"
+use_node_name_as_topic_base = true
+update_rate_hz              = 100.0
+
+sim_joint_states_topic = "/joint_states"
+sim_controller_topic   = "/base_wheel_controller/commands"
+sim_controller_type    = "velocity"   # Float64MultiArray, joints in order: BpR, BpL, BpC
+
+# No joint limits for continuous wheel joints
+
+[BpR]
+max_vel = 30.0
+
+[BpL]
+max_vel = 30.0
+
+[BpC]
+max_vel = 30.0

@@ -7,6 +7,8 @@ float64 replay_hz
 string  target_mode    # "pp" or "csp"; "" = use config default
 bool    step_through
 float32 step_pct
+bool    replay_left_arm   # default true; set false to skip left arm commands
+bool    replay_right_arm  # default true; set false to skip right arm commands
 
 # PP mode parameters (0.0 = use config default)
 float64 pp_speed

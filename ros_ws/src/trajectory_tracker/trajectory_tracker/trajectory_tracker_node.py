@@ -19,10 +19,12 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from custom_interfaces.action import Homing, RecordTrajectory, ReplayTrajectory, SimulateTrajectory
 from custom_interfaces.msg import JointCommand, MotorState, PositionCSPCommand, PositionPPCommand
 from std_msgs.msg import Bool, Empty
+from std_srvs.srv import Trigger
 from trajectory_tracker import transforms as _transforms
 from custom_interfaces.srv import CaptureHomingPose, EnableMotor, RecordArmPose, SetActiveReport, SetArmPose, SetRunMode, StopTrajectoryRecording, TrimTrajectory
 
 _VALID_MODES = frozenset({'pp', 'csp'})
+_VALID_ARMS  = frozenset({'left_arm', 'right_arm'})
 
 _MODE_INT = {
     'pp':  1,   # POSITION_PP
@@ -51,48 +53,54 @@ class TrajectoryTrackerNode(Node):
 
         cfg = self._load_config(config_path)
 
-        self._source_motors: List[str] = list(cfg['source_motors'])
-        self._target_motors: List[str] = list(cfg['target_motors'])
-        self._source_prefix: str       = cfg.get('source_node_prefix', '')
-        self._target_prefix: str       = cfg.get('target_node_prefix', '')
-        _node_name: str                = cfg.get('node_name', 'trajectory_tracker')
-        self._ns: str                  = f'{_node_name}/'   # topic/service/action prefix
+        self._left_arm_motors:  List[str] = list(cfg['left_arm_motors'])
+        self._right_arm_motors: List[str] = list(cfg['right_arm_motors'])
+        self._left_arm_prefix:  str       = cfg.get('left_arm_node_prefix', '')
+        self._right_arm_prefix: str       = cfg.get('right_arm_node_prefix', '')
+
+        _node_name: str = cfg.get('node_name', 'trajectory_tracker')
+        self._ns: str   = f'{_node_name}/'
+
         self._active_report_hz:     float = float(cfg.get('active_report_hz',     50.0))
         self._trajectory_record_hz: float = float(cfg.get('trajectory_record_hz', 50.0))
         self._replay_hz:            float = float(cfg.get('replay_hz',            50.0))
+
         _pkg_path = Path(cfg['package_path'])
         self._export_path: str = str(_pkg_path / 'recorded_trajectories')
-        self._poses_path: str = str(_pkg_path / 'recorded_poses')
+        self._poses_path:  str = str(_pkg_path / 'recorded_poses')
 
-        # motor_map: explicit source→target, falls back to parallel lists
+        # motor_map: explicit recording→replay mapping; falls back to parallel lists
         if 'motor_map' in cfg:
             self._motor_map: Dict[str, str] = dict(cfg['motor_map'])
         else:
-            self._motor_map: Dict[str, str] = {
-                s: t for s, t in zip(self._source_motors, self._target_motors)
+            self._motor_map = {
+                s: t for s, t in zip(self._left_arm_motors, self._right_arm_motors)
             }
+
+        # Derive recording/replay arms from which arm's motors appear in motor_map keys
+        map_keys = set(self._motor_map.keys())
+        if map_keys.issubset(set(self._left_arm_motors)):
+            self._recording_arm     = 'left_arm'
+            self._recording_motors  = self._left_arm_motors
+            self._recording_prefix  = self._left_arm_prefix
+            self._replay_arm        = 'right_arm'
+            self._replay_motors     = self._right_arm_motors
+            self._replay_prefix     = self._right_arm_prefix
+        else:
+            self._recording_arm     = 'right_arm'
+            self._recording_motors  = self._right_arm_motors
+            self._recording_prefix  = self._right_arm_prefix
+            self._replay_arm        = 'left_arm'
+            self._replay_motors     = self._left_arm_motors
+            self._replay_prefix     = self._left_arm_prefix
 
         self._transforms:         Dict[str, callable] = self._load_transforms(cfg, 'transform_map')
         self._inverse_transforms: Dict[str, callable] = self._load_transforms(cfg, 'inverse_transform_map')
 
-        mode = cfg.get('target_motors_mode', 'pp')
+        mode = cfg.get('replay_motor_mode', 'pp')
         if mode not in _VALID_MODES:
-            raise RuntimeError(f'Invalid target_motors_mode "{mode}". Valid: {_VALID_MODES}')
+            raise RuntimeError(f'Invalid replay_motor_mode "{mode}". Valid: {_VALID_MODES}')
         self._target_mode: str = mode
-
-        source_state_pattern = cfg.get(
-            'source_motor_state_topic_pattern',
-            f'{self._source_prefix}/motors/{{name}}/state',
-        )
-        self._source_state_pattern: str = source_state_pattern
-        target_pp_pattern = cfg.get(
-            'target_pp_topic_pattern',
-            f'{self._target_prefix}/motors/{{name}}/cmd_position_pp',
-        )
-        target_csp_pattern = cfg.get(
-            'target_csp_topic_pattern',
-            f'{self._target_prefix}/motors/{{name}}/cmd_position_csp',
-        )
 
         pp = cfg.get('pp_defaults', {})
         self._pp_defaults: Dict[str, float] = {
@@ -108,75 +116,100 @@ class TrajectoryTrackerNode(Node):
             'current_limit': float(csp.get('current_limit', 0.0)),
         }
 
-        # Latest cached state per source motor (populated by _on_motor_state)
         self._latest_states: Dict[str, MotorState] = {}
 
-        # Recording state
         self._is_recording:           bool                     = False
         self._recording_stop_event:   Optional[threading.Event] = None
         self._last_recording_file:    str                      = ''
         self._last_recording_samples: int                      = 0
 
-        # Step-through state (set while a step_through replay is active)
         self._step_event:            Optional[threading.Event] = None
         self._step_cancel_requested: bool                      = False
 
+        self._replay_active:      bool             = False
+        self._replay_pause_event: threading.Event  = threading.Event()
+        self._replay_pause_event.set()   # unpaused by default
+
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
-        # Service clients
-        self._source_report_client = self.create_client(
+        # Active report clients — one per physical arm
+        self._left_arm_report_client = self.create_client(
             SetActiveReport,
-            f'{self._source_prefix}/set_active_report',
+            f'{self._left_arm_prefix}/set_active_report',
             callback_group=self._cb_srvs,
         )
-        self._target_report_client = self.create_client(
+        self._right_arm_report_client = self.create_client(
             SetActiveReport,
-            f'{self._target_prefix}/set_active_report',
+            f'{self._right_arm_prefix}/set_active_report',
             callback_group=self._cb_srvs,
         )
 
-        # Source state subscriptions — one per source motor
+        # State subscriptions for all motors on both arms so fault monitoring
+        # works regardless of which arm is currently replaying.
         self._state_subs: Dict[str, object] = {}
-        for name in self._source_motors:
-            topic = source_state_pattern.format(name=name)
+        for name in self._left_arm_motors:
+            topic = f'{self._left_arm_prefix}/motors/{name}/state'
             self._state_subs[name] = self.create_subscription(
-                MotorState,
-                topic,
+                MotorState, topic,
                 lambda msg, n=name: self._on_motor_state(n, msg),
-                qos,
-                callback_group=self._cb_subs,
+                qos, callback_group=self._cb_subs,
+            )
+        for name in self._right_arm_motors:
+            topic = f'{self._right_arm_prefix}/motors/{name}/state'
+            self._state_subs[name] = self.create_subscription(
+                MotorState, topic,
+                lambda msg, n=name: self._on_motor_state(n, msg),
+                qos, callback_group=self._cb_subs,
             )
 
-        # Target command publishers — one per target motor
+        # Command publishers — created for ALL motors on both arms so any
+        # recording→replay direction can be served without dynamic publisher creation.
         self._pp_pubs:  Dict[str, object] = {}
         self._csp_pubs: Dict[str, object] = {}
-        for name in self._target_motors:
+        for name in self._left_arm_motors:
             self._pp_pubs[name]  = self.create_publisher(
-                PositionPPCommand, target_pp_pattern.format(name=name), qos)
+                PositionPPCommand,
+                f'{self._left_arm_prefix}/motors/{name}/cmd_position_pp',
+                qos,
+            )
             self._csp_pubs[name] = self.create_publisher(
-                PositionCSPCommand, target_csp_pattern.format(name=name), qos)
+                PositionCSPCommand,
+                f'{self._left_arm_prefix}/motors/{name}/cmd_position_csp',
+                qos,
+            )
+        for name in self._right_arm_motors:
+            self._pp_pubs[name]  = self.create_publisher(
+                PositionPPCommand,
+                f'{self._right_arm_prefix}/motors/{name}/cmd_position_pp',
+                qos,
+            )
+            self._csp_pubs[name] = self.create_publisher(
+                PositionCSPCommand,
+                f'{self._right_arm_prefix}/motors/{name}/cmd_position_csp',
+                qos,
+            )
 
-        # Cache of SetRunMode / EnableMotor clients keyed by node prefix
-        self._run_mode_clients:    Dict[str, object] = {}
+        self._run_mode_clients:     Dict[str, object] = {}
         self._enable_motor_clients: Dict[str, object] = {}
 
-        # Capture homing pose service
+        self.create_service(
+            Trigger,
+            f'{self._ns}pause_resume_replay',
+            self._srv_pause_resume_replay,
+            callback_group=self._cb_srvs,
+        )
         self.create_service(
             CaptureHomingPose,
             f'{self._ns}capture_homing_pose',
             self._capture_homing_pose,
             callback_group=self._cb_srvs,
         )
-
-        # Record arm pose service
         self.create_service(
             RecordArmPose,
             f'{self._ns}record_arm_pose',
             self._record_arm_pose,
             callback_group=self._cb_srvs,
         )
-
-        # Set arm pose service
         self.create_service(
             SetArmPose,
             f'{self._ns}set_arm_pose',
@@ -184,7 +217,6 @@ class TrajectoryTrackerNode(Node):
             callback_group=self._cb_srvs,
         )
 
-        # Homing action server
         self._homing_action_server = ActionServer(
             self,
             Homing,
@@ -192,8 +224,6 @@ class TrajectoryTrackerNode(Node):
             self._execute_homing,
             callback_group=self._cb_srvs,
         )
-
-        # Record trajectory action server
         self._record_action_server = ActionServer(
             self,
             RecordTrajectory,
@@ -201,16 +231,12 @@ class TrajectoryTrackerNode(Node):
             self._execute_record_trajectory,
             callback_group=self._cb_srvs,
         )
-
-        # Stop recording service
         self.create_service(
             StopTrajectoryRecording,
             f'{self._ns}stop_trajectory_recording',
             self._stop_recording,
             callback_group=self._cb_srvs,
         )
-
-        # Step trajectory trigger topic — Bool: true=step, false=cancel
         self.create_subscription(
             Bool,
             f'{self._ns}step_trajectory',
@@ -218,16 +244,12 @@ class TrajectoryTrackerNode(Node):
             10,
             callback_group=self._cb_subs,
         )
-
-        # Trim trajectory service
         self.create_service(
             TrimTrajectory,
             f'{self._ns}trim_trajectory',
             self._trim_trajectory,
             callback_group=self._cb_srvs,
         )
-
-        # Replay trajectory action server
         self._replay_action_server = ActionServer(
             self,
             ReplayTrajectory,
@@ -235,8 +257,6 @@ class TrajectoryTrackerNode(Node):
             self._execute_replay_trajectory,
             callback_group=self._cb_srvs,
         )
-
-        # Simulate trajectory action server
         self._simulate_action_server = ActionServer(
             self,
             SimulateTrajectory,
@@ -244,15 +264,12 @@ class TrajectoryTrackerNode(Node):
             self._execute_simulate_trajectory,
             callback_group=self._cb_srvs,
         )
-
-        # Publisher for simulated joint commands
         self._joint_cmd_pub = self.create_publisher(
             JointCommand,
             f'{self._ns}joint_command',
             QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE),
         )
 
-        # One-shot setup timer — fires after 1 s to let motor nodes start
         self._setup_timer = self.create_timer(
             1.0, self._setup_once, callback_group=self._cb_setup
         )
@@ -260,42 +277,44 @@ class TrajectoryTrackerNode(Node):
         self.get_logger().info(
             f'TrajectoryTrackerNode init — '
             f'ns={self._ns}  '
-            f'source={self._source_prefix} ({len(self._source_motors)} motors)  '
-            f'target={self._target_prefix} ({len(self._target_motors)} motors)  '
-            f'mode={self._target_mode}  '
-            f'services=[capture_homing_pose, record_arm_pose, set_arm_pose, stop_trajectory_recording, trim_trajectory]  '
-            f'topics=[step_trajectory]  '
-            f'actions=[homing, record_trajectory, replay_trajectory, simulate_trajectory]'
+            f'recording={self._recording_prefix} ({len(self._recording_motors)} motors)  '
+            f'replay={self._replay_prefix} ({len(self._replay_motors)} motors)  '
+            f'mode={self._target_mode}'
         )
 
     # ── Config ────────────────────────────────────────────────────────────────
 
     def _load_transforms(self, cfg: dict, key: str) -> Dict[str, callable]:
-        map_cfg = cfg.get(key, {})
+        """Load transform map keyed by base motor name (no L/R suffix)."""
         result: Dict[str, callable] = {}
-        for source in self._motor_map:
-            fn_name = map_cfg.get(source)
-            if fn_name is None:
-                result[source] = _transforms.passthrough
+        for base_name, fn_name in cfg.get(key, {}).items():
+            fn = getattr(_transforms, fn_name, None)
+            if fn is None:
+                self.get_logger().warning(
+                    f'[{base_name}] {key} "{fn_name}" not found in transforms.py — using passthrough'
+                )
+                result[base_name] = _transforms.passthrough
             else:
-                fn = getattr(_transforms, fn_name, None)
-                if fn is None:
-                    self.get_logger().warning(
-                        f'[{source}] {key} "{fn_name}" not found in transforms.py — using passthrough'
-                    )
-                    result[source] = _transforms.passthrough
-                else:
-                    result[source] = fn
-                    self.get_logger().info(f'[{source}] {key}: {fn_name}')
+                result[base_name] = fn
         return result
+
+    def _get_transform(self, motor_name: str, transform_map: Dict[str, callable]) -> callable:
+        """Look up transform by base name (strip trailing L/R suffix)."""
+        return transform_map.get(motor_name[:-1], _transforms.passthrough)
 
     def _prefix_for_motors(self, motor_names: List[str]) -> Optional[str]:
         name_set = set(motor_names)
-        if name_set.issubset(set(self._source_motors)):
-            return self._source_prefix
-        if name_set.issubset(set(self._target_motors)):
-            return self._target_prefix
+        if name_set.issubset(set(self._left_arm_motors)):
+            return self._left_arm_prefix
+        if name_set.issubset(set(self._right_arm_motors)):
+            return self._right_arm_prefix
         return None
+
+    def _motors_for_arm(self, arm: str) -> List[str]:
+        return self._left_arm_motors if arm == 'left_arm' else self._right_arm_motors
+
+    def _prefix_for_arm(self, arm: str) -> str:
+        return self._left_arm_prefix if arm == 'left_arm' else self._right_arm_prefix
 
     def _resolve_config(self, name: str) -> str:
         p = Path(name)
@@ -330,8 +349,8 @@ class TrajectoryTrackerNode(Node):
     def _setup_once(self) -> None:
         self._setup_timer.cancel()
         self._setup_timer = None
-        self._set_active_report(self._source_report_client, self._source_prefix, enable=True)
-        self._set_active_report(self._target_report_client, self._target_prefix, enable=True)
+        self._set_active_report(self._left_arm_report_client,  self._left_arm_prefix,  enable=True)
+        self._set_active_report(self._right_arm_report_client, self._right_arm_prefix, enable=True)
         self.get_logger().info('Setup complete')
 
     def _set_active_report(self, client, prefix: str, enable: bool) -> None:
@@ -352,10 +371,30 @@ class TrajectoryTrackerNode(Node):
                 f'[{prefix}] active report {"enabled" if enable else "disabled"}: {res.message}'
             )
 
+    # ── Replay pause/resume service ───────────────────────────────────────────
+
+    def _srv_pause_resume_replay(self, _req: Trigger.Request, res: Trigger.Response):
+        if not self._replay_active:
+            res.success = False
+            res.message = 'No replay in progress'
+            return res
+
+        if self._replay_pause_event.is_set():
+            self._replay_pause_event.clear()
+            res.success = True
+            res.message = 'Replay paused'
+        else:
+            self._replay_pause_event.set()
+            res.success = True
+            res.message = 'Replay resumed'
+
+        self.get_logger().info(res.message)
+        return res
+
     # ── State callback ────────────────────────────────────────────────────────
 
-    def _on_motor_state(self, source_name: str, msg: MotorState) -> None:
-        self._latest_states[source_name] = msg
+    def _on_motor_state(self, motor_name: str, msg: MotorState) -> None:
+        self._latest_states[motor_name] = msg
 
     # ── Publish helpers ───────────────────────────────────────────────────────
 
@@ -400,7 +439,6 @@ class TrajectoryTrackerNode(Node):
         goal_hz     = float(goal_handle.request.replay_hz)
         goal_mode   = goal_handle.request.target_mode.strip()
 
-        # Resolve PP/CSP params: goal value if non-zero, else config default
         pp_speed        = goal_handle.request.pp_speed        or self._pp_defaults['speed']
         pp_accel        = goal_handle.request.pp_acceleration or self._pp_defaults['acceleration']
         pp_decel        = goal_handle.request.pp_deceleration or self._pp_defaults['deceleration']
@@ -422,7 +460,6 @@ class TrajectoryTrackerNode(Node):
         if not rows:
             return _abort('CSV has no data rows')
 
-        # Resolve replay_hz: goal > CSV metadata > config fallback
         if goal_hz > 0.0:
             hz = goal_hz
         elif 'replay_hz' in metadata:
@@ -434,10 +471,8 @@ class TrajectoryTrackerNode(Node):
             hz = self._replay_hz
         interval = 1.0 / hz
 
-        # Resolve mode: goal > config
         mode = goal_mode if goal_mode in _VALID_MODES else self._target_mode
 
-        # Parse motor columns from header
         _FIELDS  = ['position', 'velocity', 'torque', 'temperature', 'mode', 'fault', 'enabled']
         n_fields = len(_FIELDS)
         csv_motors = [
@@ -446,68 +481,137 @@ class TrajectoryTrackerNode(Node):
             if col.endswith('_position')
         ]
 
-        # Only replay motors present in both CSV and motor_map
-        replay_pairs: List[tuple] = []   # (col_index_base, source_name, target_name)
-        for i, src in enumerate(csv_motors):
-            tgt = self._motor_map.get(src)
-            if tgt and tgt in self._pp_pubs:
-                replay_pairs.append((1 + i * n_fields, src, tgt))
+        req_left  = goal_handle.request.replay_left_arm
+        req_right = goal_handle.request.replay_right_arm
+        if not req_left and not req_right:
+            return _abort('At least one of replay_left_arm or replay_right_arm must be true')
 
-        if not replay_pairs:
-            return _abort('No matching motor_map entries found in CSV')
+        left_set  = set(self._left_arm_motors)
+        right_set = set(self._right_arm_motors)
+        csv_set   = set(csv_motors)
+
+        both_recorded = bool(csv_set & left_set) and bool(csv_set & right_set)
+
+        # replay_entries: (col_base, rec_motor, replay_motor, transform_fn)
+        # Publishers already exist for all motors on both arms.
+        replay_entries: List[tuple] = []
+
+        for i, rec_motor in enumerate(csv_motors):
+            col_base = 1 + i * n_fields
+
+            if rec_motor in left_set:
+                rec_arm, opp_suffix = 'left_arm', 'R'
+            elif rec_motor in right_set:
+                rec_arm, opp_suffix = 'right_arm', 'L'
+            else:
+                continue
+
+            base = rec_motor[:-1]
+
+            if both_recorded:
+                # CSV has both arms — only same-arm passthrough, discard the other
+                if rec_arm == 'left_arm' and req_left:
+                    replay_entries.append((col_base, rec_motor, rec_motor, _transforms.passthrough))
+                elif rec_arm == 'right_arm' and req_right:
+                    replay_entries.append((col_base, rec_motor, rec_motor, _transforms.passthrough))
+            else:
+                # Single arm recorded — support same-arm and cross-arm
+                if req_left:
+                    if rec_arm == 'left_arm':
+                        replay_entries.append((col_base, rec_motor, rec_motor, _transforms.passthrough))
+                    else:
+                        replay_entries.append((
+                            col_base, rec_motor, base + 'L',
+                            self._get_transform(rec_motor, self._inverse_transforms),
+                        ))
+                if req_right:
+                    if rec_arm == 'right_arm':
+                        replay_entries.append((col_base, rec_motor, rec_motor, _transforms.passthrough))
+                    else:
+                        replay_entries.append((
+                            col_base, rec_motor, base + 'R',
+                            self._get_transform(rec_motor, self._transforms),
+                        ))
+
+        if not replay_entries:
+            return _abort('No motors to replay — check arm filter flags and CSV contents')
 
         self.get_logger().info(
             f'ReplayTrajectory — {traj_name}  hz={hz}  mode={mode}  '
-            f'motors={[t for _, _, t in replay_pairs]}'
+            f'replay_motors={list({e[2] for e in replay_entries})}'
         )
 
-        # Set run mode for all target motors
-        run_mode_client = self._get_run_mode_client(self._target_prefix)
-        if not run_mode_client.wait_for_service(timeout_sec=3.0):
-            return _abort(f'{self._target_prefix}/set_run_mode not available')
+        # Set run mode and enable motors, grouped by prefix
+        prefix_motors: Dict[str, List[str]] = {}
+        for _, _, replay_motor, _ in replay_entries:
+            prefix = self._left_arm_prefix if replay_motor in left_set else self._right_arm_prefix
+            prefix_motors.setdefault(prefix, []).append(replay_motor)
 
-        for _, _src, tgt in replay_pairs:
-            req = SetRunMode.Request()
-            req.name = tgt
-            req.mode = _MODE_INT[mode]
-            req.automatic_enable_disable = True
-            run_mode_client.call(req)
+        enable_clients: Dict[str, object] = {}
+        for prefix, motors in prefix_motors.items():
+            run_client = self._get_run_mode_client(prefix)
+            if not run_client.wait_for_service(timeout_sec=3.0):
+                return _abort(f'{prefix}/set_run_mode not available')
+            for motor in motors:
+                req = SetRunMode.Request()
+                req.name = motor
+                req.mode = _MODE_INT[mode]
+                req.automatic_enable_disable = True
+                run_client.call(req)
 
-        # Enable all target motors
-        enable_client = self._get_enable_motor_client(self._target_prefix)
-        if not enable_client.wait_for_service(timeout_sec=3.0):
-            return _abort(f'{self._target_prefix}/enable_motor not available')
+            en_client = self._get_enable_motor_client(prefix)
+            if not en_client.wait_for_service(timeout_sec=3.0):
+                return _abort(f'{prefix}/enable_motor not available')
+            en_req             = EnableMotor.Request()
+            en_req.name        = 'all'
+            en_req.enable      = True
+            en_req.clear_fault = False
+            en_client.call(en_req)
+            enable_clients[prefix] = en_client
 
-        en_req             = EnableMotor.Request()
-        en_req.name        = 'all'
-        en_req.enable      = True
-        en_req.clear_fault = False
-        enable_client.call(en_req)
+        total        = len(rows)
+        published    = 0
+        start_mono   = time.monotonic()
+        last_row     = None
+        step_through  = bool(goal_handle.request.step_through)
+        step_pct      = float(goal_handle.request.step_pct)
+        step_frames   = max(1, int(total * step_pct / 100.0)) if step_through else 0
+        replay_motors = {e[2] for e in replay_entries}
 
-        # Replay frames
-        total       = len(rows)
-        published   = 0
-        start_mono  = time.monotonic()
-        last_row    = None
-        step_through = bool(goal_handle.request.step_through)
-        step_pct     = float(goal_handle.request.step_pct)
-        step_frames  = max(1, int(total * step_pct / 100.0)) if step_through else 0
+        self._replay_active = True
+        self._replay_pause_event.set()   # ensure unpaused at start
+
+        def _check_faults() -> Optional[str]:
+            for motor in replay_motors:
+                state = self._latest_states.get(motor)
+                if state and state.fault:
+                    return f'{motor} fault=0x{state.fault:08X}'
+            return None
+
+        def _wait_if_paused() -> bool:
+            """Block while paused. Returns False if cancel or fault detected during wait."""
+            while not self._replay_pause_event.is_set():
+                if goal_handle.is_cancel_requested:
+                    return False
+                if _check_faults():
+                    return False
+                time.sleep(0.05)
+            return True
 
         def _publish_row(row):
             nonlocal last_row, published
             loop_start = time.monotonic()
-            for base, src, tgt in replay_pairs:
+            for col_base, rec_motor, replay_motor, transform in replay_entries:
                 try:
-                    position = float(row[base + 0])
+                    position = float(row[col_base])
                 except (IndexError, ValueError):
                     continue
-                transform = self._transforms.get(src, _transforms.passthrough)
                 pos = transform(position)
                 if mode == 'pp':
-                    self._publish_pp(tgt, pos, pp_speed, pp_accel, pp_decel, pp_torque)
+                    self._publish_pp(replay_motor, pos, pp_speed, pp_accel, pp_decel, pp_torque)
                 elif mode == 'csp':
-                    self._publish_csp(tgt, pos, csp_speed_lim, csp_current_lim)
-            last_row  = row
+                    self._publish_csp(replay_motor, pos, csp_speed_lim, csp_current_lim)
+            last_row   = row
             published += 1
             fb                  = ReplayTrajectory.Feedback()
             fb.frames_published = published
@@ -525,6 +629,8 @@ class TrajectoryTrackerNode(Node):
             r.success, r.message, r.frames_published = False, 'Cancelled', published
             return r
 
+        fault_desc: Optional[str] = None
+
         if step_through:
             self._step_event            = threading.Event()
             self._step_cancel_requested = False
@@ -535,12 +641,14 @@ class TrajectoryTrackerNode(Node):
             frame_idx = 0
             cancelled = False
             while frame_idx < total:
-                # Wait for trigger, polling so cancel is responsive
                 while not self._step_event.wait(timeout=0.1):
                     if goal_handle.is_cancel_requested:
                         cancelled = True
                         break
-                if cancelled:
+                    fault_desc = _check_faults()
+                    if fault_desc:
+                        break
+                if cancelled or fault_desc:
                     break
 
                 self._step_event.clear()
@@ -554,47 +662,72 @@ class TrajectoryTrackerNode(Node):
                     if goal_handle.is_cancel_requested or self._step_cancel_requested:
                         cancelled = True
                         break
+                    fault_desc = _check_faults()
+                    if fault_desc:
+                        break
+                    if not _wait_if_paused():
+                        fault_desc = fault_desc or (_check_faults())
+                        if not fault_desc:
+                            cancelled = True
+                        break
                     _publish_row(row)
-                if cancelled:
+                if cancelled or fault_desc:
                     break
                 frame_idx = batch_end
 
             self._step_event            = None
             self._step_cancel_requested = False
-            if cancelled:
+            if fault_desc:
+                pass   # handled below
+            elif cancelled:
+                self._replay_active = False
                 return _cancelled()
         else:
             for row in rows:
                 if goal_handle.is_cancel_requested:
+                    self._replay_active = False
                     return _cancelled()
+                fault_desc = _check_faults()
+                if fault_desc:
+                    break
+                if not _wait_if_paused():
+                    fault_desc = _check_faults()
+                    if not fault_desc and goal_handle.is_cancel_requested:
+                        self._replay_active = False
+                        return _cancelled()
+                    break
                 _publish_row(row)
 
-        # Hold last position for 1 s
+        self._replay_active = False
+        self._replay_pause_event.set()   # ensure unpaused for next replay
+
+        if fault_desc:
+            msg = f'Motor fault detected after {published} frames — {fault_desc}. Motors left enabled at last pose.'
+            self.get_logger().error(msg)
+            goal_handle.canceled()
+            result                  = ReplayTrajectory.Result()
+            result.success          = False
+            result.message          = msg
+            result.frames_published = published
+            return result
+
         if last_row is not None:
-            for base, src, tgt in replay_pairs:
+            for col_base, rec_motor, replay_motor, transform in replay_entries:
                 try:
-                    position = float(last_row[base + 0])
+                    position = float(last_row[col_base])
                 except (IndexError, ValueError):
                     continue
-                transform = self._transforms.get(src, _transforms.passthrough)
                 pos = transform(position)
                 if mode == 'pp':
-                    self._publish_pp(tgt, pos, pp_speed, pp_accel, pp_decel, pp_torque)
+                    self._publish_pp(replay_motor, pos, pp_speed, pp_accel, pp_decel, pp_torque)
                 else:
-                    self._publish_csp(tgt, pos, csp_speed_lim, csp_current_lim)
+                    self._publish_csp(replay_motor, pos, csp_speed_lim, csp_current_lim)
             time.sleep(1.0)
-
-        # Disable motors
-        dis_req             = EnableMotor.Request()
-        dis_req.name        = 'all'
-        dis_req.enable      = False
-        dis_req.clear_fault = False
-        enable_client.call(dis_req)
 
         goal_handle.succeed()
         result                  = ReplayTrajectory.Result()
         result.success          = True
-        result.message          = f'Replayed {published}/{total} frames in {mode} mode at {hz} Hz'
+        result.message          = f'Replayed {published}/{total} frames in {mode} mode at {hz} Hz. Motors left enabled at last pose.'
         result.frames_published = published
         self.get_logger().info(result.message)
         return result
@@ -606,7 +739,7 @@ class TrajectoryTrackerNode(Node):
             self._step_event.set()
         else:
             self._step_cancel_requested = True
-            self._step_event.set()   # unblock the wait so the loop can exit
+            self._step_event.set()
 
     # ── Record arm pose service ───────────────────────────────────────────────
 
@@ -614,20 +747,15 @@ class TrajectoryTrackerNode(Node):
         arm  = request.arm.strip().lower()
         name = request.name.strip()
 
-        if arm not in ('source', 'target'):
+        if arm not in _VALID_ARMS:
             response.success   = False
-            response.message   = 'arm must be "source" or "target"'
+            response.message   = f'arm must be "left_arm" or "right_arm", got "{arm}"'
             response.file_path = ''
             return response
 
-        if arm == 'source':
-            motor_names  = self._source_motors
-            prefix       = self._source_prefix
-            state_pattern = self._source_state_pattern
-        else:
-            motor_names  = self._target_motors
-            prefix       = self._target_prefix
-            state_pattern = f'{self._target_prefix}/motors/{{name}}/state'
+        motor_names   = self._motors_for_arm(arm)
+        prefix        = self._prefix_for_arm(arm)
+        state_pattern = f'{prefix}/motors/{{name}}/state'
 
         if not name:
             name = datetime.now().strftime('%H_%M_%S_%d_%m_%y')
@@ -697,11 +825,11 @@ class TrajectoryTrackerNode(Node):
     def _set_arm_pose(self, request, response):
         name = request.name.strip()
         mode = request.target_mode.strip()
-        arm  = request.arm.strip() if request.arm.strip() else 'target'
+        arm  = request.arm.strip().lower() if request.arm.strip() else self._replay_arm
 
-        if arm not in ('source', 'target'):
+        if arm not in _VALID_ARMS:
             response.success, response.message, response.motors_set = \
-                False, f'arm must be "source" or "target", got "{arm}"', []
+                False, f'arm must be "left_arm" or "right_arm", got "{arm}"', []
             return response
 
         if not name:
@@ -714,15 +842,12 @@ class TrajectoryTrackerNode(Node):
             response.motors_set = []
             return response
 
-        recorded_poses_dir = Path(self._poses_path)
-        file_path = recorded_poses_dir / f'{name}.csv'
-
+        file_path = Path(self._poses_path) / f'{name}.csv'
         if not file_path.exists():
             response.success, response.message, response.motors_set = \
                 False, f'File not found: {file_path}', []
             return response
 
-        # Parse CSV: motor_name → position
         motor_positions: Dict[str, float] = {}
         with open(file_path, 'r', newline='') as f:
             reader = csv.DictReader(f)
@@ -737,12 +862,11 @@ class TrajectoryTrackerNode(Node):
                 False, 'No valid motor positions found in CSV', []
             return response
 
-        # Build reverse motor map: target motor → source motor
         reverse_motor_map: Dict[str, str] = {v: k for k, v in self._motor_map.items()}
 
-        requested_prefix = self._target_prefix if arm == 'target' else self._source_prefix
+        is_recording_arm = (arm == self._recording_arm)
+        is_replay_arm    = (arm == self._replay_arm)
 
-        # Resolve mode params
         pp_speed    = request.pp_speed        or self._pp_defaults['speed']
         pp_accel    = request.pp_acceleration or self._pp_defaults['acceleration']
         pp_decel    = request.pp_deceleration or self._pp_defaults['deceleration']
@@ -753,42 +877,35 @@ class TrajectoryTrackerNode(Node):
         mode_int = _MODE_INT[mode]
         qos      = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
-        # Resolve each motor in the CSV to its command motor, prefix, and transform
-        # Source motor in CSV → transform → send to mapped target motor
-        # Target motor in CSV → same transform (self-inverse) → send to mapped source motor
-        cmd_entries: List[tuple] = []   # (src_motor, cmd_motor, prefix, transformed_position)
+        cmd_entries: List[tuple] = []
         for csv_motor, position in motor_positions.items():
             if csv_motor in self._motor_map:
-                # CSV has source motor
-                if arm == 'target':
-                    # source → transform → target
+                # CSV has a recording-arm motor
+                if is_replay_arm:
                     cmd_motor = self._motor_map[csv_motor]
-                    prefix    = self._target_prefix
-                    transform = self._transforms.get(csv_motor, _transforms.passthrough)
+                    prefix    = self._replay_prefix
+                    transform = self._get_transform(csv_motor, self._transforms)
                 else:
-                    # source → passthrough → source
                     cmd_motor = csv_motor
-                    prefix    = self._source_prefix
+                    prefix    = self._recording_prefix
                     transform = _transforms.passthrough
             elif csv_motor in reverse_motor_map:
-                # CSV has target motor
-                source_key = reverse_motor_map[csv_motor]
-                if arm == 'source':
-                    # target → inverse transform → source
-                    cmd_motor = source_key
-                    prefix    = self._source_prefix
-                    transform = self._inverse_transforms.get(source_key, _transforms.passthrough)
+                # CSV has a replay-arm motor
+                rec_motor = reverse_motor_map[csv_motor]
+                if is_recording_arm:
+                    cmd_motor = rec_motor
+                    prefix    = self._recording_prefix
+                    transform = self._get_transform(rec_motor, self._inverse_transforms)
                 else:
-                    # target → passthrough → target
                     cmd_motor = csv_motor
-                    prefix    = self._target_prefix
+                    prefix    = self._replay_prefix
                     transform = _transforms.passthrough
             else:
                 self.get_logger().warning(f'[{csv_motor}] not in motor_map — skipping')
                 continue
             cmd_entries.append((csv_motor, cmd_motor, prefix, transform(position)))
 
-        # Set run mode (with automatic enable) grouped by prefix
+        # Set run mode grouped by prefix
         prefix_motors: Dict[str, List[str]] = {}
         for _, cmd_motor, prefix, _ in cmd_entries:
             prefix_motors.setdefault(prefix, []).append(cmd_motor)
@@ -807,9 +924,8 @@ class TrajectoryTrackerNode(Node):
                 if not res.success:
                     self.get_logger().error(f'[{motor}] set_run_mode failed: {res.message}')
 
-        # Publish position commands
         motors_set: List[str] = []
-        for src_motor, cmd_motor, prefix, cmd_position in cmd_entries:
+        for csv_motor, cmd_motor, prefix, cmd_position in cmd_entries:
             if mode == 'pp':
                 pub = self.create_publisher(
                     PositionPPCommand, f'{prefix}/motors/{cmd_motor}/cmd_position_pp', qos)
@@ -832,7 +948,7 @@ class TrajectoryTrackerNode(Node):
             pub.publish(cmd)
             motors_set.append(cmd_motor)
             self.get_logger().info(
-                f'[{src_motor}] → [{cmd_motor}] pose {cmd_position:.4f} rad ({mode})'
+                f'[{csv_motor}] → [{cmd_motor}] pose {cmd_position:.4f} rad ({mode})'
             )
 
         response.success    = True
@@ -844,16 +960,16 @@ class TrajectoryTrackerNode(Node):
     # ── Capture homing pose service ───────────────────────────────────────────
 
     def _capture_homing_pose(self, request, response):
-        arm = request.arm
-        if arm not in ('source', 'target'):
+        arm = request.arm.strip().lower() if hasattr(request.arm, 'strip') else request.arm
+        if arm not in _VALID_ARMS:
             response.success   = False
-            response.message   = f'arm must be "source" or "target", got "{arm}"'
+            response.message   = f'arm must be "left_arm" or "right_arm", got "{arm}"'
             response.motors    = []
             response.positions = []
             return response
 
-        prefix      = self._source_prefix if arm == 'source' else self._target_prefix
-        motor_names = self._source_motors  if arm == 'source' else self._target_motors
+        prefix      = self._prefix_for_arm(arm)
+        motor_names = self._motors_for_arm(arm)
 
         config_path = self._resolve_homing(request.config_file)
         self.get_logger().info(f'CaptureHomingPose — arm: {arm}, config: {config_path}')
@@ -926,15 +1042,15 @@ class TrajectoryTrackerNode(Node):
         })
 
         lines = [
-            f'# homing configuration\n',
-            f'\n',
-            f'[homing_pos]\n',
+            '# homing configuration\n',
+            '\n',
+            '[homing_pos]\n',
         ]
         for name in motor_names:
             lines.append(f'{name} = 0.0\n')
         lines += [
-            f'\n',
-            f'[pp_defaults]\n',
+            '\n',
+            '[pp_defaults]\n',
             f'speed        = {pp.get("speed",        5.0)}\n',
             f'acceleration = {pp.get("acceleration", 10.0)}\n',
             f'deceleration = {pp.get("deceleration", 10.0)}\n',
@@ -962,14 +1078,44 @@ class TrajectoryTrackerNode(Node):
     # ── Record trajectory action & stop service ───────────────────────────────
 
     def _execute_record_trajectory(self, goal_handle) -> RecordTrajectory.Result:
-        if self._is_recording:
+        def _abort(msg):
             goal_handle.abort()
-            result = RecordTrajectory.Result()
-            result.success = False
-            result.message = 'Already recording'
-            result.file_path = ''
-            result.samples_recorded = 0
-            return result
+            r = RecordTrajectory.Result()
+            r.success, r.message, r.file_path, r.samples_recorded = False, msg, '', 0
+            return r
+
+        if self._is_recording:
+            return _abort('Already recording')
+
+        use_left  = bool(goal_handle.request.left_arm_source)
+        use_right = bool(goal_handle.request.right_arm_source)
+
+        if not use_left and not use_right:
+            return _abort('At least one of left_arm_source or right_arm_source must be true')
+
+        # Build the ordered list of motors to record (left first, then right)
+        motors_to_record: List[str] = []
+        if use_left:
+            motors_to_record += self._left_arm_motors
+        if use_right:
+            motors_to_record += self._right_arm_motors
+
+        # Subscribe to any arms not already covered by the existing recording subs
+        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        extra_subs = []
+        existing_subs = set(self._state_subs.keys())
+        for motor in motors_to_record:
+            if motor not in existing_subs:
+                prefix = self._left_arm_prefix if motor in self._left_arm_motors else self._right_arm_prefix
+                topic  = f'{prefix}/motors/{motor}/state'
+                sub = self.create_subscription(
+                    MotorState,
+                    topic,
+                    lambda msg, n=motor: self._on_motor_state(n, msg),
+                    qos,
+                    callback_group=self._cb_subs,
+                )
+                extra_subs.append(sub)
 
         self._is_recording         = True
         self._recording_stop_event = threading.Event()
@@ -984,18 +1130,18 @@ class TrajectoryTrackerNode(Node):
         self._last_recording_file    = str(file_path)
         self._last_recording_samples = 0
 
-        # CSV header: timestamp + per-motor fields
         _FIELDS = ['position', 'velocity', 'torque', 'temperature', 'mode', 'fault', 'enabled']
-        header  = ['timestamp'] + [
-            f'{m}_{f}' for m in self._source_motors for f in _FIELDS
-        ]
+        header  = ['timestamp'] + [f'{m}_{f}' for m in motors_to_record for f in _FIELDS]
 
         start_time = time.monotonic()
         interval   = 1.0 / self._trajectory_record_hz
         samples    = 0
 
         recorded_at = datetime.now().strftime('%H_%M_%S_%d_%m_%y')
-        self.get_logger().info(f'Recording started → {file_path}')
+        arms_label  = '+'.join(
+            ([' left_arm'] if use_left else []) + (['right_arm'] if use_right else [])
+        )
+        self.get_logger().info(f'Recording started ({arms_label}) → {file_path}')
 
         with open(file_path, 'w', newline='') as csvfile:
             csvfile.write(f'# recorded_at: {recorded_at}\n')
@@ -1003,12 +1149,12 @@ class TrajectoryTrackerNode(Node):
             writer = csv.writer(csvfile)
             writer.writerow(header)
 
-            while not self._recording_stop_event.is_set():
+            while not self._recording_stop_event.is_set() and not goal_handle.is_cancel_requested:
                 loop_start = time.monotonic()
                 ts = round(loop_start - start_time, 4)
 
                 row: List = [ts]
-                for motor in self._source_motors:
+                for motor in motors_to_record:
                     state = self._latest_states.get(motor)
                     if state:
                         row += [
@@ -1036,13 +1182,23 @@ class TrajectoryTrackerNode(Node):
                 if sleep_for > 0:
                     time.sleep(sleep_for)
 
+        for sub in extra_subs:
+            self.destroy_subscription(sub)
+
         self._last_recording_file    = str(file_path)
         self._last_recording_samples = samples
         self._is_recording           = False
 
-        self.get_logger().info(
-            f'Recording stopped — {samples} samples saved to {file_path}'
-        )
+        self.get_logger().info(f'Recording stopped — {samples} samples saved to {file_path}')
+
+        if goal_handle.is_cancel_requested:
+            goal_handle.canceled()
+            result                  = RecordTrajectory.Result()
+            result.success          = False
+            result.message          = f'Cancelled — {samples} samples saved to {file_path}'
+            result.file_path        = str(file_path)
+            result.samples_recorded = samples
+            return result
 
         goal_handle.succeed()
         result                  = RecordTrajectory.Result()
@@ -1054,9 +1210,9 @@ class TrajectoryTrackerNode(Node):
 
     def _stop_recording(self, request, response):
         if not self._is_recording or self._recording_stop_event is None:
-            response.success         = False
-            response.message         = 'No active recording'
-            response.file_path       = self._last_recording_file
+            response.success          = False
+            response.message          = 'No active recording'
+            response.file_path        = self._last_recording_file
             response.samples_recorded = self._last_recording_samples
             return response
 
@@ -1067,10 +1223,9 @@ class TrajectoryTrackerNode(Node):
         response.samples_recorded = self._last_recording_samples
         return response
 
-    # ── Homing action ────────────────────────────────────────────────────────
+    # ── Homing action ─────────────────────────────────────────────────────────
 
     def _read_csv(self, file_path: Path):
-        """Return (metadata: dict, header: list, rows: list[list])."""
         metadata, header, rows = {}, None, []
         with open(file_path, 'r', newline='') as f:
             reader = csv.reader(f)
@@ -1130,10 +1285,10 @@ class TrajectoryTrackerNode(Node):
             goal_handle.abort()
             result = Homing.Result()
             result.success = False
-            result.message = f'Motors {motor_names} do not match source or target motor list'
+            result.message = f'Motors {motor_names} do not match left_arm or right_arm motor lists'
             result.homed_motors = []
             return result
-        total       = len(motor_names)
+        total = len(motor_names)
 
         run_mode_client = self._get_run_mode_client(prefix)
         if not run_mode_client.wait_for_service(timeout_sec=3.0):
@@ -1220,7 +1375,6 @@ class TrajectoryTrackerNode(Node):
             result.frames_published = 0
             return result
 
-        # Parse motor names from header: columns are timestamp, {motor}_{field}, ...
         _FIELDS = ['position', 'velocity', 'torque', 'temperature', 'mode', 'fault', 'enabled']
         n_fields = len(_FIELDS)
         motor_names = [
@@ -1257,14 +1411,13 @@ class TrajectoryTrackerNode(Node):
             except (IndexError, ValueError):
                 continue
 
-            # Build JointCommand from this row
-            msg         = JointCommand()
+            msg              = JointCommand()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.names        = motor_names
             positions, velocities, efforts = [], [], []
 
             for j, motor in enumerate(motor_names):
-                base = 1 + j * n_fields   # column offset for this motor
+                base = 1 + j * n_fields
                 try:
                     positions.append(float(row[base + 0]))
                     velocities.append(float(row[base + 1]))
@@ -1286,7 +1439,6 @@ class TrajectoryTrackerNode(Node):
             feedback.elapsed_time     = time.monotonic() - start_mono
             goal_handle.publish_feedback(feedback)
 
-            # Timing: fixed rate or honour original inter-frame delta
             if interval is not None:
                 sleep_for = interval - (time.monotonic() - loop_start)
             else:
@@ -1327,10 +1479,8 @@ class TrajectoryTrackerNode(Node):
             response.rows_before = response.rows_after = response.rows_removed = 0
             return response
 
-        ranges = list(zip(start_ts, end_ts))
-
-        export_dir = Path(self._export_path)
-        file_path  = export_dir / f'{name}.csv'
+        ranges    = list(zip(start_ts, end_ts))
+        file_path = Path(self._export_path) / f'{name}.csv'
 
         if not file_path.exists():
             response.success = False
@@ -1352,7 +1502,7 @@ class TrajectoryTrackerNode(Node):
                 except (IndexError, ValueError):
                     return True
                 for s, e in ranges:
-                    if ts > s and ts < e:
+                    if s < ts < e:
                         return False
                 return True
 
@@ -1387,29 +1537,27 @@ class TrajectoryTrackerNode(Node):
     def shutdown_cleanup(self) -> None:
         print('[trajectory_tracker] Shutting down …')
 
-        # Stop recording if active — lets the loop exit and close the CSV cleanly
         if self._is_recording and self._recording_stop_event is not None:
             print('[trajectory_tracker] Stopping active recording …')
             self._recording_stop_event.set()
-            time.sleep(0.3)   # give the loop one tick to flush and close
+            time.sleep(0.3)
 
-        # Disable target motors — covers mid-replay and mid-homing exits
-        enable_client = self._get_enable_motor_client(self._target_prefix)
-        if enable_client.service_is_ready():
-            print('[trajectory_tracker] Disabling target motors …')
-            req             = EnableMotor.Request()
-            req.name        = 'all'
-            req.enable      = False
-            req.clear_fault = False
-            done   = threading.Event()
-            future = enable_client.call_async(req)
-            future.add_done_callback(lambda _: done.set())
-            done.wait(timeout=2.0)
+        dis_req             = EnableMotor.Request()
+        dis_req.name        = 'all'
+        dis_req.enable      = False
+        dis_req.clear_fault = False
+        for prefix in (self._left_arm_prefix, self._right_arm_prefix):
+            enable_client = self._get_enable_motor_client(prefix)
+            if enable_client.service_is_ready():
+                print(f'[trajectory_tracker] Disabling {prefix} motors …')
+                done   = threading.Event()
+                future = enable_client.call_async(dis_req)
+                future.add_done_callback(lambda _: done.set())
+                done.wait(timeout=2.0)
 
-        # Disable active reporting on both arms
         for client, prefix in [
-            (self._source_report_client, self._source_prefix),
-            (self._target_report_client, self._target_prefix),
+            (self._left_arm_report_client,  self._left_arm_prefix),
+            (self._right_arm_report_client, self._right_arm_prefix),
         ]:
             if client.service_is_ready():
                 self._set_active_report(client, prefix, enable=False)

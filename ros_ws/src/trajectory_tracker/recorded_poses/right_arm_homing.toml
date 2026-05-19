@@ -1,13 +1,13 @@
 # right arm homing configuration
 
 [homing_pos]
-SpR = 0.058884
-SrR = -0.032415
-SwR = 0.048911
-EpR = -0.069626
-WwR = 0.051979
-WpR = 0.076147
-WrR = -2.228593
+SpR = 0.084586
+SrR = -0.025894
+SwR = 6.387712
+EpR = -0.054281
+WwR = 6.188618
+WpR = 0.104534
+WrR = -2.228976
 
 [pp_defaults]
 speed        = 2.50   # rad/s

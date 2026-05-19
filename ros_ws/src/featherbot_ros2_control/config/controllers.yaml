@@ -1,0 +1,117 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    left_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    right_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    neck_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    base_wheel_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+    base_bracket_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    torso_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+
+left_arm_controller:
+  ros__parameters:
+    joints:
+      - SpL
+      - SrL
+      - SwL
+      - EpL
+      - WwL
+      - WpL
+      - WrL
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+
+
+right_arm_controller:
+  ros__parameters:
+    joints:
+      - SpR
+      - SrR
+      - SwR
+      - EpR
+      - WwR
+      - WpR
+      - WrR
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+
+
+neck_controller:
+  ros__parameters:
+    joints:
+      - NwC
+      - NpC
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+
+
+base_wheel_controller:
+  ros__parameters:
+    joints:
+      - BpR
+      - BpL
+      - BpC
+
+
+base_bracket_controller:
+  ros__parameters:
+    joints:
+      - BwR
+      - BwL
+      - BwC
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+
+
+torso_controller:
+  ros__parameters:
+    joints:
+      - TvC
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false

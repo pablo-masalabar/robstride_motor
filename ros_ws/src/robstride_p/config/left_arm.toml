@@ -15,21 +15,54 @@ operation_mode            = "OPERATION"
 [SpL]
 type = "RS04"
 motor_id = 32
+joint_limit_min = -2.6114
+joint_limit_max = 2.62103
+motor_homing_pos = 0.0047
+max_torque = 120.0
+max_current = 90.0
 [SrL]
 type = "RS04"
 motor_id = 33
+joint_limit_min = -0.2605
+joint_limit_max = 3.4371
+motor_homing_pos = 0.0174
+max_torque = 120.0
+max_current = 90.0 
 [SwL]
 type = "RS03"
 motor_id = 34
+joint_limit_min = -2.2314
+joint_limit_max = 2.2018
+motor_homing_pos = -0.01476
+max_torque = 60.0
+max_current = 43.0 
 [EpL]
 type = "RS03"
 motor_id = 35
+joint_limit_min = -2.7337
+joint_limit_max = 0.9113
+motor_homing_pos = -0.0385
+max_torque = 60.0
+max_current = 43.0 
 [WwL]
 type = "RS02"
 motor_id = 36
+joint_limit_min = -2.7775
+joint_limit_max = 2.8016
+motor_homing_pos = 0.01208
+max_torque = 17.0
+max_current = 23.0 
 [WpL]
 type = "RS02"
 motor_id = 37
+joint_limit_min = -1.8352
+joint_limit_max = 1.7723
+motor_homing_pos = -0.03144
+max_torque = 17.0
+max_current = 23.0 
 [WrL]
 type = "RS02"
 motor_id = 38
+motor_homing_pos = 0.0184
+max_torque = 17.0
+max_current = 23.0 

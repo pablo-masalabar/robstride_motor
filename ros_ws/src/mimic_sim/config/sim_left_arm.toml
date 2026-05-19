@@ -1,0 +1,44 @@
+[defaults]
+node_name                   = "left_arm"
+use_node_name_as_topic_base = true
+update_rate_hz              = 100.0
+
+# Sim back-end
+sim_joint_states_topic = "/joint_states"
+sim_controller_topic   = "/left_arm_controller/joint_trajectory"
+trajectory_time_sec    = 0.05
+
+[SpL]
+joint_limit_min  = -1.570796
+joint_limit_max  =  0.017453
+motor_homing_pos =  0.0
+
+[SrL]
+joint_limit_min  = -0.610865
+joint_limit_max  =  0.087266
+motor_homing_pos =  0.0
+
+[SwL]
+joint_limit_min  = -1.570796
+joint_limit_max  =  0.017453
+motor_homing_pos =  0.0
+
+[EpL]
+joint_limit_min  = -0.017453
+joint_limit_max  =  2.094395
+motor_homing_pos =  0.0
+
+[WwL]
+joint_limit_min  = -2.356194
+joint_limit_max  =  0.785398
+motor_homing_pos =  0.0
+
+[WpL]
+joint_limit_min  = -0.785398
+joint_limit_max  =  0.785398
+motor_homing_pos =  0.0
+
+[WrL]
+joint_limit_min  = -0.785398
+joint_limit_max  =  0.785398
+motor_homing_pos =  0.0

@@ -1,0 +1,14 @@
+[defaults]
+node_name                   = "torso"
+use_node_name_as_topic_base = true
+update_rate_hz              = 100.0
+
+sim_joint_states_topic = "/joint_states"
+sim_controller_topic   = "/torso_controller/joint_trajectory"
+sim_controller_type    = "trajectory"
+trajectory_time_sec    = 0.05
+
+[TvC]
+joint_limit_min  = 0.0
+joint_limit_max  = 0.0
+motor_homing_pos = 0.0

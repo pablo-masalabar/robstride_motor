@@ -19,3 +19,6 @@ def subtract_from_2pi(position: float) -> float:
 
 def subtract_2pi(position: float) -> float:
     return position - 2 * 3.14159
+
+def subtract_from_neg_2pi(position: float) -> float:
+    return - 2 * 3.14159 - (position)

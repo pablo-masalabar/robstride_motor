@@ -33,6 +33,7 @@ Parameters
 """
 
 import importlib
+import math
 import os
 import time
 import threading
@@ -213,6 +214,7 @@ class MotorNode(Node):
         self._motor_cfg:     Dict[str, dict]               = {}
 
         self._init_motors(config)
+        self._calibrate_joint_limits()
 
         # ── Publishers ─────────────────────────────────────────────────────
         self._joint_state_pub = self.create_publisher(JointState, self._topic('joint_states'), 10)
@@ -359,6 +361,50 @@ class MotorNode(Node):
             )
             return None
 
+    def _calibrate_joint_limits(self) -> None:
+        """Shift joint_limit_min/max and motor_homing_pos by ±2π if MECH_POS is outside limits.
+
+        All three values (MECH_POS, joint_limit_min/max, motor_homing_pos) are in motor frame,
+        so MECH_POS is compared directly against the limits. When shifted together by the same
+        2π offset, the relative distances between them are preserved.
+        """
+        _2PI = 2.0 * math.pi
+        for name, motor in self._motors.items():
+            cfg = self._motor_cfg[name]
+            lo  = cfg.get('joint_limit_min')
+            hi  = cfg.get('joint_limit_max')
+
+            if lo is None or hi is None:
+                continue
+
+            try:
+                with self._motor_locks[name]:
+                    mech_pos = motor.read_param_float(ParamIndex.MECH_POS)
+            except Exception as e:
+                self.get_logger().error(f'[{name}] calibrate_joint_limits: could not read MECH_POS: {e}')
+                continue
+
+            if mech_pos is None:
+                self.get_logger().warning(f'[{name}] calibrate_joint_limits: no response for MECH_POS — skipping')
+                continue
+
+            if mech_pos > hi:
+                cfg['joint_limit_max'] = hi + _2PI
+                cfg['joint_limit_min'] = lo + _2PI
+                if cfg.get('motor_homing_pos') is not None:
+                    cfg['motor_homing_pos'] += _2PI
+                self.get_logger().info(
+                    f'[{name}] shifted +2π (mech_pos={mech_pos:.4f} > hi={hi:.4f})'
+                )
+            elif mech_pos < lo:
+                cfg['joint_limit_max'] = hi - _2PI
+                cfg['joint_limit_min'] = lo - _2PI
+                if cfg.get('motor_homing_pos') is not None:
+                    cfg['motor_homing_pos'] -= _2PI
+                self.get_logger().info(
+                    f'[{name}] shifted -2π (mech_pos={mech_pos:.4f} < lo={lo:.4f})'
+                )
+
     def _init_motors(self, config: dict) -> None:
         for name, cfg in config.items():
             motor_type = cfg.get('type')
@@ -443,13 +489,13 @@ class MotorNode(Node):
                     and self._motor_enabled.get(name, False)):
                 lim = self._motor_cfg[name]
                 lo, hi = lim.get('joint_limit_min'), lim.get('joint_limit_max')
-                if (lo is not None and user_pos < lo) or (hi is not None and user_pos > hi):
+                if (lo is not None and fb.position < lo) or (hi is not None and fb.position > hi):
                     with self._motor_locks[name]:
                         self._motors[name].disable()
                     self._motor_enabled[name] = False
                     self.get_logger().error(
                         f'[{name}] Joint limit exceeded in velocity mode '
-                        f'(pos={user_pos:.4f} rad, limits=[{lo}, {hi}]) — motor disabled'
+                        f'(motor_pos={fb.position:.4f} rad, limits=[{lo}, {hi}]) — motor disabled'
                     )
 
             if fb.fault != self._last_fault[name]:
@@ -493,17 +539,18 @@ class MotorNode(Node):
             return False
         return True
 
-    def _check_joint_limits(self, name: str, position: float) -> bool:
+    def _check_joint_limits(self, name: str, motor_pos: float) -> bool:
+        """Check motor-frame position against joint limits (also in motor frame)."""
         lim = self._motor_cfg[name]
         lo, hi = lim.get('joint_limit_min'), lim.get('joint_limit_max')
-        if lo is not None and position < lo:
+        if lo is not None and motor_pos < lo:
             self.get_logger().error(
-                f'[{name}] Rejected: position {position:.4f} rad < joint_limit_min {lo:.4f} rad'
+                f'[{name}] Rejected: motor_pos {motor_pos:.4f} rad < joint_limit_min {lo:.4f} rad'
             )
             return False
-        if hi is not None and position > hi:
+        if hi is not None and motor_pos > hi:
             self.get_logger().error(
-                f'[{name}] Rejected: position {position:.4f} rad > joint_limit_max {hi:.4f} rad'
+                f'[{name}] Rejected: motor_pos {motor_pos:.4f} rad > joint_limit_max {hi:.4f} rad'
             )
             return False
         return True
@@ -573,17 +620,18 @@ class MotorNode(Node):
         return max_c  # None → motor default (MAX_CURRENT_A)
 
     def _user_pos(self, name: str, motor_pos: float) -> float:
-        """Convert motor-frame position to user frame (subtract homing offset)."""
+        """Return position relative to homing point (motor_pos − motor_homing_pos). For display only."""
         return motor_pos - (self._motor_cfg[name].get('motor_homing_pos') or 0.0)
 
-    def _motor_pos(self, name: str, user_pos: float) -> float:
-        """Convert user-frame position to motor frame (add homing offset)."""
-        return user_pos + (self._motor_cfg[name].get('motor_homing_pos') or 0.0)
+    def _motor_pos(self, name: str, cmd_pos: float) -> float:
+        """Convert a command (relative to homing point) to absolute motor-frame position."""
+        return cmd_pos + (self._motor_cfg[name].get('motor_homing_pos') or 0.0)
 
     def _on_cmd_operation(self, msg: OperationCommand, name: str) -> None:
         if not self._check_mode(name, RunMode.OPERATION):
             return
-        if not self._check_joint_limits(name, msg.position):
+        motor_pos = self._motor_pos(name, msg.position)
+        if not self._check_joint_limits(name, motor_pos):
             return
         lim   = self._motor_cfg[name]
         vel   = self._clamp_vel(name, msg.velocity)
@@ -593,7 +641,7 @@ class MotorNode(Node):
         with self._motor_locks[name]:
             try:
                 motor.set_operation_control(
-                    position  = self._motor_pos(name, msg.position),
+                    position  = motor_pos,
                     velocity  = vel,
                     torque_ff = self._clamp_torque(name, msg.torque_ff),
                     kp        = kp,
@@ -605,7 +653,8 @@ class MotorNode(Node):
     def _on_cmd_position_pp(self, msg: PositionPPCommand, name: str) -> None:
         if not self._check_mode(name, RunMode.POSITION_PP):
             return
-        if not self._check_joint_limits(name, msg.position):
+        motor_pos = self._motor_pos(name, msg.position)
+        if not self._check_joint_limits(name, motor_pos):
             return
         speed = self._clamp_vel(name,   msg.speed        if msg.speed        > 0.0 else 2.0)
         accel = self._clamp_accel(name, msg.acceleration if msg.acceleration > 0.0 else 10.0)
@@ -614,7 +663,7 @@ class MotorNode(Node):
         with self._motor_locks[name]:
             try:
                 motor.set_position_pp(
-                    position_rad        = self._motor_pos(name, msg.position),
+                    position_rad        = motor_pos,
                     speed_rad_s         = speed,
                     acceleration_rad_s2 = accel,
                     deceleration_rad_s2 = decel,
@@ -653,14 +702,15 @@ class MotorNode(Node):
     def _on_cmd_position_csp(self, msg: PositionCSPCommand, name: str) -> None:
         if not self._check_mode(name, RunMode.POSITION_CSP):
             return
-        if not self._check_joint_limits(name, msg.position):
+        motor_pos = self._motor_pos(name, msg.position)
+        if not self._check_joint_limits(name, motor_pos):
             return
         speed = self._clamp_vel(name, msg.speed_limit if msg.speed_limit > 0.0 else 2.0)
         motor = self._motors[name]
         with self._motor_locks[name]:
             try:
                 motor.set_position_csp(
-                    position_rad      = self._motor_pos(name, msg.position),
+                    position_rad      = motor_pos,
                     speed_limit_rad_s = speed,
                     current_limit_a   = self._resolve_current_limit(name, msg.current_limit),
                 )

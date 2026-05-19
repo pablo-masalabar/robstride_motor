@@ -1,0 +1,51 @@
+# mimic node — unified config
+# target_node controls which arm receives commands (the other becomes source).
+# Switch at runtime: ros2 service call /mimic_node/switch_target \
+#   custom_interfaces/srv/SetMimicTarget "{target: 'left_arm'}"
+
+mode             = "pp"
+debug            = false
+active_report_hz = 30.0
+# op_hz          = 30.0   # uncomment to publish at fixed rate instead of passthrough
+
+left_arm_node_prefix  = "/left_arm"
+right_arm_node_prefix = "/right_arm"
+
+# "right_arm" → left arm is source, right arm follows
+# "left_arm"  → right arm is source, left arm follows
+target_node = "right_arm"
+
+# Base motor names — L/R suffix is appended automatically based on direction
+motors = ["Sp", "Sr", "Sw", "Ep", "Ww", "Wp", "Wr"]
+
+[pp_defaults]
+speed        = 5.0    # rad/s
+acceleration = 5.0    # rad/s²
+deceleration = 5.0    # rad/s²
+torque_limit = 15.0   # N·m
+
+[csp_defaults]
+speed_limit   = 10.0  # rad/s
+current_limit = 20.0  # A
+
+# Transforms applied when target_node = "right_arm" (source = left arm).
+# Keys are base motor names (no L/R suffix).
+# Function names reference mimic/transforms.py.
+[transform_map]
+Sp = "negate"
+Sr = "negate"
+Sw = "negate"
+Ep = "negate"
+Ww = "negate"
+Wp = "negate"
+Wr = "passthrough"
+
+# Transforms applied when target_node = "left_arm" (source = right arm).
+[inverse_transform_map]
+Sp = "negate"
+Sr = "negate"
+Sw = "negate"
+Ep = "negate"
+Ww = "negate"
+Wp = "negate"
+Wr = "passthrough"

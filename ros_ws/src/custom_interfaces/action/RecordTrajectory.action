@@ -1,8 +1,11 @@
-# Record source motor states to a CSV file at trajectory_record_hz.
+# Record motor states to a CSV file at trajectory_record_hz.
 # trajectory_name: filename without extension; if empty, uses H_M_S_DD_MM_YY timestamp.
-# Action stays active until the stop_recording service is called.
+# At least one of left_arm_source / right_arm_source must be true.
+# Action stays active until cancelled or the stop_recording service is called.
 
 string trajectory_name
+bool   left_arm_source
+bool   right_arm_source
 ---
 bool   success
 string message

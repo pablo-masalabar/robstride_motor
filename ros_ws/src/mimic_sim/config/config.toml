@@ -1,0 +1,45 @@
+node_name = "mimic_sim"
+
+# How far ahead (seconds) each trajectory point is targeted.
+# Must be > 0; smaller = more responsive, larger = smoother.
+trajectory_time_sec = 0.1
+
+# Each [[bridges]] entry forwards one real-robot JointState topic to one
+# sim controller topic.
+#
+# source_topic : sensor_msgs/JointState published by the real motor_node
+# sink_topic   : sim controller input topic
+# sink_type    : "trajectory"  ->  trajectory_msgs/JointTrajectory
+#                "velocity"    ->  std_msgs/Float64MultiArray
+
+[[bridges]]
+source_topic = "/left_arm/joint_states"
+sink_topic   = "/left_arm_controller/joint_trajectory"
+sink_type    = "trajectory"
+
+[[bridges]]
+source_topic = "/right_arm/joint_states"
+sink_topic   = "/right_arm_controller/joint_trajectory"
+sink_type    = "trajectory"
+
+# Uncomment and adjust prefixes once neck / base / torso motor nodes are running:
+
+# [[bridges]]
+# source_topic = "/neck/joint_states"
+# sink_topic   = "/neck_controller/joint_trajectory"
+# sink_type    = "trajectory"
+
+# [[bridges]]
+# source_topic = "/base/joint_states"
+# sink_topic   = "/base_bracket_controller/joint_trajectory"
+# sink_type    = "trajectory"
+
+# [[bridges]]
+# source_topic = "/base/wheel_states"
+# sink_topic   = "/base_wheel_controller/commands"
+# sink_type    = "velocity"
+
+# [[bridges]]
+# source_topic = "/torso/joint_states"
+# sink_topic   = "/torso_controller/joint_trajectory"
+# sink_type    = "trajectory"

@@ -1,6 +1,6 @@
 # trajectory_tracker
 
-ROS 2 package for recording, replaying, and managing arm trajectories and poses for RobStride motors. Operates on two arms defined as **source** and **target**, with configurable per-motor transforms between them.
+ROS 2 package for recording, replaying, and managing arm trajectories and poses for RobStride motors. Supports two physical arms (`left_arm` / `right_arm`) with configurable per-joint transforms, flexible recording/replay direction, fault detection, and pause/resume control.
 
 ---
 
@@ -9,62 +9,53 @@ ROS 2 package for recording, replaying, and managing arm trajectories and poses 
 ```
 trajectory_tracker/
 ├── config/
-│   ├── left_s_right_t.toml      # Left arm source, right arm target
-│   ├── right_s_left_t.toml      # Right arm source, left arm target
-│   ├── left_arm_homing.toml     # Homing pose for left arm
-│   └── right_arm_homing.toml   # Homing pose for right arm
+│   └── config.toml              # Single unified config
 ├── launch/
-│   ├── left_s_right_t.launch.py
-│   └── right_s_left_t.launch.py
-├── recorded_poses/              # Snapshot poses saved by record_arm_pose
-├── recorded_trajectories/       # Not used by node; for manual file management
+│   └── trajectory_tracker.launch.py
+├── recorded_poses/              # Snapshot poses saved by record_arm_pose / capture_homing_pose
+├── recorded_trajectories/       # CSVs written by record_trajectory
 ├── trajectory_tracker/
 │   ├── trajectory_tracker_node.py
-│   └── transforms.py            # Per-motor position transform functions
+│   └── transforms.py            # Per-joint position transform functions
 ```
 
 ---
 
-## Config files
-
-### Trajectory config (`left_s_right_t.toml` / `right_s_left_t.toml`)
+## Config (`config.toml`)
 
 | Field | Description |
 |---|---|
 | `node_name` | Prefix for all service, action, and topic names |
-| `source_node_prefix` | ROS 2 node prefix of the source arm motor node |
-| `target_node_prefix` | ROS 2 node prefix of the target arm motor node |
-| `active_report_hz` | Hz for active state reporting on both arms at startup |
-| `trajectory_record_hz` | Sampling rate when recording a trajectory to CSV |
+| `package_path` | Absolute path to the package root; used to resolve `recorded_poses/` and `recorded_trajectories/` |
+| `left_arm_node_prefix` | ROS 2 node prefix of the physical left arm (e.g. `"/left_arm"`) |
+| `right_arm_node_prefix` | ROS 2 node prefix of the physical right arm (e.g. `"/right_arm"`) |
+| `left_arm_motors` | Physical left arm motor names (e.g. `["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]`) |
+| `right_arm_motors` | Physical right arm motor names (e.g. `["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]`) |
+| `active_report_hz` | Active state reporting rate requested from both arms at startup (Hz) |
+| `trajectory_record_hz` | Sampling rate when recording a trajectory to CSV (Hz) |
 | `replay_hz` | Fallback replay rate if not set in CSV metadata or action goal |
-| `target_motors_mode` | Default command mode: `"pp"` or `"csp"` |
-| `export_path` | Directory where trajectory CSVs are written |
-| `source_motors` | List of source arm motor names |
-| `target_motors` | List of target arm motor names (parallel to `source_motors`) |
-| `source_motor_state_topic_pattern` | Topic pattern for source motor states (`{name}` is replaced) |
-| `target_pp_topic_pattern` | Topic pattern for target PP commands |
-| `target_csp_topic_pattern` | Topic pattern for target CSP commands |
-| `[motor_map]` | Explicit source motor → target motor mapping |
-| `[transform_map]` | Per-source-motor transform function name (source → target direction) |
-| `[inverse_transform_map]` | Per-source-motor transform for target → source direction |
-| `[pp_defaults]` | Default PP motion parameters: `speed`, `acceleration`, `deceleration`, `torque_limit` |
+| `replay_motor_mode` | Default command mode for replay: `"pp"` or `"csp"` |
+| `[motor_map]` | Recording motor → replay motor mapping. Keys determine which arm records; values determine which replays. |
+| `[transform_map]` | Per-joint transform applied going **left → right**. Keys are **base names** (no L/R suffix, e.g. `Sp`). |
+| `[inverse_transform_map]` | Per-joint transform applied going **right → left**. Keys are base names. |
+| `[pp_defaults]` | Default PP parameters: `speed`, `acceleration`, `deceleration`, `torque_limit` |
 | `[csp_defaults]` | Default CSP parameters: `speed_limit`, `current_limit` |
 
-### Homing config (`left_arm_homing.toml` / `right_arm_homing.toml`)
+### Direction detection
 
-| Field | Description |
-|---|---|
-| `motor_node_prefix` | ROS 2 node prefix of the arm being homed |
-| `motor_mode` | Mode for homing: `"pp"` or `"csp"` |
-| `[homing_pos]` | Motor name → target position (rad) |
-| `[pp_defaults]` | PP parameters used when `motor_mode = "pp"` |
-| `[csp_defaults]` | CSP parameters used when `motor_mode = "csp"` |
+The node auto-detects recording and replay arms from `[motor_map]`:
+- If motor_map keys ⊆ `left_arm_motors` → left arm records, right arm replays
+- If motor_map keys ⊆ `right_arm_motors` → right arm records, left arm replays
+
+### Transform keys
+
+Transform map keys are **base motor names** (strip the trailing `L` or `R`). This makes them direction-independent — the same config works regardless of which arm records.
 
 ---
 
 ## Transforms
 
-Transforms are defined in `transforms.py`. Each function takes a `float` position and returns a `float`.
+Defined in `transforms.py`. Each function: `(position: float) -> float`.
 
 | Name | Formula |
 |---|---|
@@ -73,10 +64,9 @@ Transforms are defined in `transforms.py`. Each function takes a `float` positio
 | `subtract_from_2pi` | `2π − x` |
 | `subtract_2pi` | `x − 2π` |
 
-**`[transform_map]`** is applied when going **source → target** (replay, simulate).  
-**`[inverse_transform_map]`** is applied when going **target → source** (`set_arm_pose` with a target-recorded pose).
-
-Both maps are keyed by the **source motor name**.
+`[transform_map]` is used when going **left → right**.  
+`[inverse_transform_map]` is used when going **right → left**.  
+**Same-arm** replay always uses passthrough regardless of the maps.
 
 ---
 
@@ -84,234 +74,261 @@ Both maps are keyed by the **source motor name**.
 
 On startup the node:
 
-1. Loads the config file specified via the `config_path` ROS 2 parameter.
-2. Resolves `config_dir` (defaults to the parent directory of `config_path`) — used to resolve short filenames passed to services and actions.
-3. Loads motor maps, transforms, and inverse transforms.
-4. Creates PP and CSP command publishers for every target motor.
-5. Subscribes to the state topic of every source motor (caches latest `MotorState` per motor).
-6. Registers all services and action servers under the `node_name` namespace.
-7. After a 1 s delay, enables active reporting on both source and target arms.
+1. Loads `config.toml` from the `config_path` ROS 2 parameter.
+2. Derives recording/replay arms from `[motor_map]`.
+3. Creates PP and CSP command publishers for **all** motors on both arms (enables any replay direction without dynamic publisher creation).
+4. Subscribes to state topics for **all** motors on both arms (enables fault monitoring on any replay arm).
+5. Registers all services and action servers under `node_name`.
+6. After 1 s: enables active reporting on both arms.
 
 ---
 
 ## Topics
 
-All topics are prefixed with `node_name` (e.g. `trajectory_tracker/`).
+All topics are prefixed with `node_name/` (e.g. `trajectory_tracker/`).
 
 | Topic | Type | Direction | Description |
 |---|---|---|---|
-| `joint_command` | `custom_interfaces/JointCommand` | Published | One frame per `simulate_trajectory` tick — position, velocity, effort for all source motors |
-| `step_trajectory` | `std_msgs/Bool` | Subscribed | `true` = advance one step in step-through replay; `false` = cancel the replay |
+| `joint_command` | `custom_interfaces/JointCommand` | Published | One frame per `simulate_trajectory` tick |
+| `step_trajectory` | `std_msgs/Bool` | Subscribed | `true` = advance one step in step-through replay; `false` = cancel |
 
 ---
 
 ## Services
 
-All services are prefixed with `node_name`.
+All services are prefixed with `node_name/`.
+
+### `pause_resume_replay`
+Toggle pause/resume of an active `replay_trajectory` action. First call pauses, second resumes. While paused, motors hold the last commanded pose. Cancel and fault detection remain active during pause.
+
+**Type:** `std_srvs/srv/Trigger`
+
+```bash
+ros2 service call /trajectory_tracker/pause_resume_replay std_srvs/srv/Trigger
+```
+
+---
 
 ### `capture_homing_pose`
-Reads current motor positions from the arm specified in a homing `.toml` file and writes them back to `[homing_pos]` in that file.
+Reads current motor positions from the specified physical arm and writes them to `[homing_pos]` in a homing `.toml` file.
 
-**Request:** `config_file` (path or filename relative to `config_dir`)  
+**Type:** `custom_interfaces/srv/CaptureHomingPose`  
+**Request:** `arm` (`"left_arm"` or `"right_arm"`), `config_file` (path or filename relative to `recorded_poses/`)  
 **Response:** `success`, `message`, `motors[]`, `positions[]`
-
-**Flow:**
-1. Load homing config to get `motor_node_prefix` and `[homing_pos]` motor names.
-2. Subscribe temporarily to each motor's state topic; wait up to 3 s per motor.
-3. Update `[homing_pos]` values in the file in-place using regex (comments preserved).
-4. Destroy temporary subscriptions.
 
 ---
 
 ### `record_arm_pose`
-Captures the current state of either the source or target arm and saves it as a CSV in `{export_path}/recorded_poses/`.
+Captures the current state of one physical arm and saves it as a CSV in `recorded_poses/`.
 
-**Request:** `arm` (`"source"` or `"target"`), `name` (filename; empty → `H_M_S_DD_MM_YY`)  
+**Type:** `custom_interfaces/srv/RecordArmPose`  
+**Request:** `arm` (`"left_arm"` or `"right_arm"`), `name` (filename; empty → timestamp)  
 **Response:** `success`, `message`, `file_path`
 
 **CSV columns:** `motor_name`, `position`, `velocity`, `torque`, `temperature`, `mode`, `fault`, `enabled`
 
-**Flow:**
-1. Determine motor list and state topic pattern from `arm` field.
-2. Subscribe temporarily to each motor's state topic; wait up to 3 s per motor.
-3. Write one CSV row per motor.
-
 ---
 
 ### `set_arm_pose`
-Loads a pose CSV from `recorded_poses/`, applies the appropriate transform, sets run mode, and commands the mapped motors.
+Loads a pose CSV and sends position commands to the specified arm, applying the appropriate transform if cross-arm.
 
-**Request:** `name`, `target_mode` (`"pp"` or `"csp"`), PP/CSP params (0.0 = config default)  
+**Type:** `custom_interfaces/srv/SetArmPose`  
+**Request:** `name`, `arm` (`"left_arm"` or `"right_arm"`; empty → replay arm), `target_mode` (`"pp"` or `"csp"`), PP/CSP params (0.0 = config default)  
 **Response:** `success`, `message`, `motors_set[]`
 
 **Transform logic:**
-- If CSV motor is a **source motor** → apply `[transform_map]` → command the **mapped target motor**
-- If CSV motor is a **target motor** → apply `[inverse_transform_map]` → command the **mapped source motor**
 
-**Flow:**
-1. Load CSV, parse `motor_name → position`.
-2. Resolve each motor's destination and transform.
-3. Call `set_run_mode` with `automatic_enable_disable=True` for all destination motors — this disables, changes mode, and re-enables.
-4. Publish position commands. Motors are left **enabled and in the specified mode**.
+| CSV contains | `arm` requested | Command sent to | Transform |
+|---|---|---|---|
+| Recording-arm motor | Replay arm | Mapped replay motor | `transform_map` |
+| Recording-arm motor | Recording arm | Same motor | passthrough |
+| Replay-arm motor | Recording arm | Mapped recording motor | `inverse_transform_map` |
+| Replay-arm motor | Replay arm | Same motor | passthrough |
 
 ---
 
 ### `stop_trajectory_recording`
-Stops an active `record_trajectory` action by signalling its stop event.
+Stops an active `record_trajectory` action.
 
-**Request:** (none)  
+**Type:** `custom_interfaces/srv/StopTrajectoryRecording`  
 **Response:** `success`, `message`, `file_path`, `samples_recorded`
 
 ---
 
 ### `trim_trajectory`
-Removes rows from a trajectory CSV whose timestamp falls inside any of the given `(start_ts, end_ts)` ranges (exclusive). Edits the file in-place.
+Removes rows from a trajectory CSV whose timestamp falls inside any of the given `(start_ts, end_ts)` ranges. Edits the file in-place.
 
-**Request:** `trajectory_name`, `start_ts[]`, `end_ts[]` (parallel lists)  
+**Type:** `custom_interfaces/srv/TrimTrajectory`  
+**Request:** `trajectory_name`, `start_ts[]`, `end_ts[]`  
 **Response:** `success`, `message`, `rows_before`, `rows_after`, `rows_removed`
 
 ---
 
 ## Actions
 
-All actions are prefixed with `node_name`.
+All actions are prefixed with `node_name/`.
 
 ### `homing`
-Moves all motors listed in a homing config to their defined home positions.
+Moves all motors listed in a homing config to their defined home positions using PP mode.
 
-**Goal:** `config_path` (path or filename relative to `config_dir`)  
+**Type:** `custom_interfaces/action/Homing`  
+**Goal:** `config_path` (path or filename relative to `recorded_poses/`)  
 **Feedback:** `motor_name`, `motors_done`, `motors_total`  
 **Result:** `success`, `message`, `homed_motors[]`
 
-**Constraints:** `motor_mode` must be `"pp"` or `"csp"` — velocity mode is rejected.
-
-**Flow:**
-1. Load homing config; validate `motor_mode`.
-2. For each motor: call `set_run_mode` (`automatic_enable_disable=True`), then publish the position command with the configured PP/CSP params.
-3. Motors are left **enabled and holding** the homing position when the action exits.
+The node resolves which physical arm the homing config belongs to from the motor names in `[homing_pos]` — no cross-arm transform is applied. Motors are left **enabled and holding** the homing position.
 
 ---
 
 ### `record_trajectory`
-Records source motor states to a CSV file at `trajectory_record_hz`, running until `stop_trajectory_recording` is called.
+Records motor states to a CSV at `trajectory_record_hz`. Stops when cancelled or when `stop_trajectory_recording` is called.
 
-**Goal:** `trajectory_name` (empty → `H_M_S_DD_MM_YY` timestamp)  
+**Type:** `custom_interfaces/action/RecordTrajectory`
+
+**Goal fields:**
+
+| Field | Description |
+|---|---|
+| `trajectory_name` | CSV filename without extension; empty → timestamp |
+| `left_arm_source` | Record left arm motors |
+| `right_arm_source` | Record right arm motors |
+
+At least one of `left_arm_source` / `right_arm_source` must be `true`. Both can be `true` to record both arms simultaneously into one CSV.
+
 **Feedback:** `samples_recorded`, `elapsed_time`  
 **Result:** `success`, `message`, `file_path`, `samples_recorded`
 
-**CSV metadata lines (before header):**
+**CSV metadata:**
 ```
 # recorded_at: H_M_S_DD_MM_YY
 # replay_hz: <trajectory_record_hz>
 ```
 
-**CSV columns:** `timestamp` (seconds from action start, 4 decimal places), then for each source motor: `{motor}_position`, `{motor}_velocity`, `{motor}_torque`, `{motor}_temperature`, `{motor}_mode`, `{motor}_fault`, `{motor}_enabled`
-
-**Flow:**
-1. Open CSV file, write metadata and header.
-2. Every `1/trajectory_record_hz` seconds: sample `_latest_states` cache, write one row.
-3. On `stop_trajectory_recording` service call: exit loop, close file cleanly.
-4. On node shutdown: `_recording_stop_event` is set automatically — file is always closed cleanly.
+**CSV columns:** `timestamp` (seconds), then for each recorded motor: `{motor}_position`, `{motor}_velocity`, `{motor}_torque`, `{motor}_temperature`, `{motor}_mode`, `{motor}_fault`, `{motor}_enabled`
 
 ---
 
 ### `replay_trajectory`
-Loads a trajectory CSV and replays it onto target motors via the configured transforms.
+Loads a trajectory CSV and replays it. Supports any recording→replay arm combination, simultaneous dual-arm replay, fault detection, and pause/resume.
 
-**Goal:**
+**Type:** `custom_interfaces/action/ReplayTrajectory`
+
+**Goal fields:**
 
 | Field | Description |
 |---|---|
-| `trajectory_name` | CSV filename (without extension) |
-| `replay_hz` | Playback rate; `0.0` → use `# replay_hz` from CSV metadata, then config fallback |
-| `target_mode` | `"pp"` or `"csp"`; `""` → use config `target_motors_mode` |
-| `step_through` | If `true`, advance by `step_pct` per trigger instead of continuous playback |
-| `step_pct` | Percentage of total frames to advance per `step_trajectory` trigger |
+| `trajectory_name` | CSV filename without extension |
+| `replay_hz` | Playback rate; `0.0` → CSV metadata → config fallback |
+| `target_mode` | `"pp"` or `"csp"`; `""` → config `replay_motor_mode` |
+| `replay_left_arm` | Send commands to left arm motors |
+| `replay_right_arm` | Send commands to right arm motors |
+| `step_through` | Advance by `step_pct` per trigger instead of continuous |
+| `step_pct` | Percentage of total frames per `step_trajectory` trigger |
 | `pp_speed` / `pp_acceleration` / `pp_deceleration` / `pp_torque_limit` | PP overrides; `0.0` → config default |
 | `csp_speed_limit` / `csp_current_limit` | CSP overrides; `0.0` → config default |
+
+At least one of `replay_left_arm` / `replay_right_arm` must be `true`.
 
 **Feedback:** `frames_published`, `frames_total`, `elapsed_time`, `progress_pct`  
 **Result:** `success`, `message`, `frames_published`
 
-**Flow:**
-1. Load CSV via `_read_csv` (skips `#` metadata lines); parse `replay_hz` from metadata.
-2. Resolve Hz, mode, and PP/CSP params.
-3. For each source motor present in `[motor_map]`: call `set_run_mode` on its target.
-4. Enable all target motors.
-5. Replay loop: for each row, apply `[transform_map]` to position, publish to target motor's command topic.
-6. **Step-through mode:** wait on `step_trajectory` topic before each batch. Publish `true` to advance, `false` to cancel.
-7. After last frame: hold last position for 1 s (PP/CSP), then disable all target motors.
-8. On node shutdown: target motors are disabled by `shutdown_cleanup`.
+#### Replay direction matrix
 
-**Hz resolution order:** goal `replay_hz` → CSV `# replay_hz` → config `replay_hz`
+| `replay_left_arm` | `replay_right_arm` | CSV recorded from | What happens |
+|---|---|---|---|
+| true | false | left | left→left, passthrough |
+| false | true | left | left→right, forward transform |
+| true | false | right | right→left, inverse transform |
+| false | true | right | right→right, passthrough |
+| true | true | left | left→left (passthrough) + left→right (forward transform) simultaneously |
+| true | true | right | right→right (passthrough) + right→left (inverse transform) simultaneously |
+| true | false | both | left portion→left (passthrough), right portion discarded |
+| false | true | both | right portion→right (passthrough), left portion discarded |
+| true | true | both | left portion→left (passthrough) + right portion→right (passthrough) |
+
+#### Fault detection
+
+During replay, all replay motors are monitored for non-zero fault bitmasks. On fault:
+- Replay stops immediately
+- Action is cancelled with a descriptive message
+- Motors are left **enabled and holding the last commanded pose**
+
+#### Motor state after replay
+
+Motors are always left **enabled and holding the last commanded pose** on all exit paths (normal completion, fault, cancel). Motors are only disabled on node shutdown.
+
+#### Pause / resume
+
+Use the `pause_resume_replay` service to toggle pause mid-replay. Motors hold the last pose while paused. Cancel and fault detection remain active.
 
 ---
 
 ### `simulate_trajectory`
-Loads a trajectory CSV and publishes each frame as a `JointCommand` message (does not command motors directly).
+Loads a trajectory CSV and publishes each frame as a `JointCommand` message without commanding motors.
 
-**Goal:** `trajectory_name`, `replay_hz` (`0.0` → use original inter-frame timestamps from CSV)  
+**Type:** `custom_interfaces/action/SimulateTrajectory`  
+**Goal:** `trajectory_name`, `replay_hz` (`0.0` → honour original inter-frame timestamps)  
 **Feedback:** `frames_published`, `frames_total`, `elapsed_time`  
 **Result:** `success`, `message`, `frames_published`
-
-**Flow:**
-1. Load CSV, parse motor names from header.
-2. Publish one `JointCommand` per row: `names[]`, `positions[]`, `velocities[]`, `efforts[]` with `header.stamp` set to current ROS time.
-3. Timing: fixed interval if `replay_hz > 0`, else sleep the exact inter-frame delta from the CSV `timestamp` column.
 
 ---
 
 ## Shutdown behaviour
 
-`shutdown_cleanup` is called on SIGINT and performs the following in order:
-
-1. If recording is active: sets the stop event → recording loop exits and closes the CSV cleanly.
-2. Disables all target motors via `enable_motor all=False`.
-3. Disables active reporting on both source and target arms.
+On SIGINT, `shutdown_cleanup`:
+1. Stops any active recording (CSV is closed cleanly).
+2. Disables motors on both arms.
+3. Disables active reporting on both arms.
 
 ---
 
-## Step-through replay
-
-Step-through mode allows advancing through a trajectory one batch at a time, useful for inspection or manual validation.
+## Launch
 
 ```bash
-# Start a step-through replay (10% per step)
-ros2 action send_goal /trajectory_tracker/replay_trajectory \
-  custom_interfaces/action/ReplayTrajectory \
-  "{trajectory_name: 'my_traj', replay_hz: 0.0, target_mode: '', \
-    step_through: true, step_pct: 10.0, \
-    pp_speed: 0.0, pp_acceleration: 0.0, pp_deceleration: 0.0, pp_torque_limit: 0.0, \
-    csp_speed_limit: 0.0, csp_current_limit: 0.0}"
+ros2 launch trajectory_tracker trajectory_tracker.launch.py
 
-# Advance one step
-ros2 topic pub --once /trajectory_tracker/step_trajectory std_msgs/msg/Bool "{data: true}"
-
-# Cancel
-ros2 topic pub --once /trajectory_tracker/step_trajectory std_msgs/msg/Bool "{data: false}"
+# Custom config
+ros2 launch trajectory_tracker trajectory_tracker.launch.py \
+  config_path:=/path/to/custom.toml
 ```
 
 ---
 
 ## Typical workflows
 
-### Record and replay a trajectory
+### Record left arm, replay on right arm
 
 ```bash
-# 1. Start recording (left arm source)
+# 1. Start recording left arm
 ros2 action send_goal /trajectory_tracker/record_trajectory \
-  custom_interfaces/action/RecordTrajectory "{trajectory_name: 'demo'}"
+  custom_interfaces/action/RecordTrajectory \
+  "{trajectory_name: 'demo', left_arm_source: true, right_arm_source: false}"
 
-# 2. Move the left arm manually or via teleop
-
-# 3. Stop recording
+# 2. Stop recording (or cancel the action)
 ros2 service call /trajectory_tracker/stop_trajectory_recording \
   custom_interfaces/srv/StopTrajectoryRecording
 
-# 4. Replay on right arm
+# 3. Replay on right arm
 ros2 action send_goal /trajectory_tracker/replay_trajectory \
   custom_interfaces/action/ReplayTrajectory \
   "{trajectory_name: 'demo', replay_hz: 0.0, target_mode: 'pp', \
+    replay_left_arm: false, replay_right_arm: true, \
+    step_through: false, step_pct: 0.0, \
+    pp_speed: 0.0, pp_acceleration: 0.0, pp_deceleration: 0.0, pp_torque_limit: 0.0, \
+    csp_speed_limit: 0.0, csp_current_limit: 0.0}"
+```
+
+### Record both arms, replay on both
+
+```bash
+ros2 action send_goal /trajectory_tracker/record_trajectory \
+  custom_interfaces/action/RecordTrajectory \
+  "{trajectory_name: 'both', left_arm_source: true, right_arm_source: true}"
+
+ros2 action send_goal /trajectory_tracker/replay_trajectory \
+  custom_interfaces/action/ReplayTrajectory \
+  "{trajectory_name: 'both', replay_hz: 0.0, target_mode: 'pp', \
+    replay_left_arm: true, replay_right_arm: true, \
     step_through: false, step_pct: 0.0, \
     pp_speed: 0.0, pp_acceleration: 0.0, pp_deceleration: 0.0, pp_torque_limit: 0.0, \
     csp_speed_limit: 0.0, csp_current_limit: 0.0}"
@@ -320,7 +337,6 @@ ros2 action send_goal /trajectory_tracker/replay_trajectory \
 ### Homing
 
 ```bash
-# Home the left arm
 ros2 action send_goal /trajectory_tracker/homing \
   custom_interfaces/action/Homing "{config_path: 'left_arm_homing.toml'}"
 ```
@@ -330,19 +346,31 @@ ros2 action send_goal /trajectory_tracker/homing \
 ```bash
 # Capture current left arm pose
 ros2 service call /trajectory_tracker/record_arm_pose \
-  custom_interfaces/srv/RecordArmPose "{arm: 'source', name: 'rest_pose'}"
+  custom_interfaces/srv/RecordArmPose "{arm: 'left_arm', name: 'rest_pose'}"
 
-# Restore it (applied to right arm via transform)
+# Send it to the right arm (applies forward transform)
 ros2 service call /trajectory_tracker/set_arm_pose \
   custom_interfaces/srv/SetArmPose \
-  "{name: 'rest_pose', target_mode: 'pp', \
+  "{name: 'rest_pose', arm: 'right_arm', target_mode: 'pp', \
     pp_speed: 0.0, pp_acceleration: 0.0, pp_deceleration: 0.0, pp_torque_limit: 0.0, \
     csp_speed_limit: 0.0, csp_current_limit: 0.0}"
 ```
 
-### Update homing positions from current pose
+### Step-through replay
 
 ```bash
-ros2 service call /trajectory_tracker/capture_homing_pose \
-  custom_interfaces/srv/CaptureHomingPose "{config_file: 'left_arm_homing.toml'}"
+# Start step-through (10% per step)
+ros2 action send_goal /trajectory_tracker/replay_trajectory \
+  custom_interfaces/action/ReplayTrajectory \
+  "{trajectory_name: 'demo', replay_hz: 0.0, target_mode: 'pp', \
+    replay_left_arm: false, replay_right_arm: true, \
+    step_through: true, step_pct: 10.0, \
+    pp_speed: 0.0, pp_acceleration: 0.0, pp_deceleration: 0.0, pp_torque_limit: 0.0, \
+    csp_speed_limit: 0.0, csp_current_limit: 0.0}"
+
+# Advance one step
+ros2 topic pub --once /trajectory_tracker/step_trajectory std_msgs/msg/Bool "{data: true}"
+
+# Cancel step-through
+ros2 topic pub --once /trajectory_tracker/step_trajectory std_msgs/msg/Bool "{data: false}"
 ```

@@ -1,0 +1,19 @@
+[defaults]
+node_name                   = "neck"
+use_node_name_as_topic_base = true
+update_rate_hz              = 100.0
+
+sim_joint_states_topic = "/joint_states"
+sim_controller_topic   = "/neck_controller/joint_trajectory"
+sim_controller_type    = "trajectory"
+trajectory_time_sec    = 0.05
+
+[NwC]
+joint_limit_min  = -1.570796
+joint_limit_max  =  1.570796
+motor_homing_pos =  0.0
+
+[NpC]
+joint_limit_min  = -0.523599
+joint_limit_max  =  1.570796
+motor_homing_pos =  0.0

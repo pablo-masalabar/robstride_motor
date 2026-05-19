@@ -1,0 +1,701 @@
+<?xml version="1.0" ?>
+<robot name="featherbot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+<xacro:include filename="$(find featherbot_description)/urdf/materials.xacro" />
+<xacro:include filename="$(find featherbot_ros2_control)/ros2_control/featherbot.ros2_control.xacro" />
+
+<xacro:featherbot_ros2_control/>
+
+<xacro:if value="$(arg use_sim)">
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find featherbot_ros2_control)/config/controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+</xacro:if>
+<link name="base_link">
+  <inertial>
+    <origin xyz="-0.1613039366028417 -5.6394439068371676e-05 0.41599696004518427" rpy="0 0 0"/>
+    <mass value="44.87393281091962"/>
+    <inertia ixx="2.466818" iyy="2.809159" izz="1.281912" ixy="0.000462" iyz="-0.000735" ixz="0.496584"/>
+  </inertial>
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Drive_Bracket_1">
+  <inertial>
+    <origin xyz="-1.541198289455037e-05 0.010851014125612582 -0.04813042960756267" rpy="0 0 0"/>
+    <mass value="1.0221025605094933"/>
+    <inertia ixx="0.001905" iyy="0.001844" izz="0.001134" ixy="0.0" iyz="0.00026" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.11 0.13 -0.1405" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Bracket_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.11 0.13 -0.1405" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Bracket_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Drive_Bracket_2">
+  <inertial>
+    <origin xyz="1.5411983130583784e-05 -0.010851014125577499 -0.04813042960756231" rpy="0 0 0"/>
+    <mass value="1.0221025605094933"/>
+    <inertia ixx="0.001905" iyy="0.001844" izz="0.001134" ixy="0.0" iyz="-0.00026" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.11 -0.13 -0.1405" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Bracket_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.11 -0.13 -0.1405" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Bracket_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Drive_Bracket_3">
+  <inertial>
+    <origin xyz="-1.5016966846401192e-05 0.010851014125832694 -0.048130429607563086" rpy="0 0 0"/>
+    <mass value="1.0221025605094933"/>
+    <inertia ixx="0.001905" iyy="0.001844" izz="0.001134" ixy="0.0" iyz="0.00026" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.115167 -0.0 -0.1405" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Bracket_3.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.115167 -0.0 -0.1405" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Bracket_3.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Drive_Wheel_1">
+  <inertial>
+    <origin xyz="-7.915890165577366e-14 0.03027137033081992 3.999995930245581e-07" rpy="0 0 0"/>
+    <mass value="0.27976912099837775"/>
+    <inertia ixx="0.000236" iyy="0.000422" izz="0.000236" ixy="0.0" iyz="0.0" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.11 0.1621 -0.06" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Wheel_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.11 0.1621 -0.06" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Wheel_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Drive_Wheel_2">
+  <inertial>
+    <origin xyz="3.1998015348477793e-13 0.2939286296692234 3.9999959574460453e-07" rpy="0 0 0"/>
+    <mass value="0.27976912099837775"/>
+    <inertia ixx="0.000236" iyy="0.000422" izz="0.000236" ixy="0.0" iyz="-0.0" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.11 0.1621 -0.06" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Wheel_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.11 0.1621 -0.06" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Wheel_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Drive_Wheel_3">
+  <inertial>
+    <origin xyz="-0.2251666049835191 0.16027137033104014 3.999999079809524e-07" rpy="0 0 0"/>
+    <mass value="0.27976912099837775"/>
+    <inertia ixx="0.000236" iyy="0.000422" izz="0.000236" ixy="-0.0" iyz="0.0" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.11 0.1621 -0.06" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Wheel_3.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.11 0.1621 -0.06" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Drive_Wheel_3.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Torso_1">
+  <inertial>
+    <origin xyz="-0.08202161855815666 9.710725998312944e-05 0.7099753265956164" rpy="0 0 0"/>
+    <mass value="10.760152946669496"/>
+    <inertia ixx="0.617392" iyy="0.639387" izz="0.097869" ixy="0.000349" iyz="3.8e-05" ixz="0.02388"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.06125 0.0 -0.633575" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Torso_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.06125 0.0 -0.633575" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Torso_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_SpR_SrR_1">
+  <inertial>
+    <origin xyz="-0.0007250300214718719 -0.056441275473879976 0.0014118078223672725" rpy="0 0 0"/>
+    <mass value="1.5824043001931132"/>
+    <inertia ixx="0.005052" iyy="0.002529" izz="0.004478" ixy="2.1e-05" iyz="7.7e-05" ixz="-5.8e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.0 0.1187 -1.46674" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SpR_SrR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.0 0.1187 -1.46674" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SpR_SrR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_SrR_SwR_1">
+  <inertial>
+    <origin xyz="0.024151762693293468 -3.0856800878609203e-06 -0.045058276208043146" rpy="0 0 0"/>
+    <mass value="2.5945539804970523"/>
+    <inertia ixx="0.009462" iyy="0.011492" izz="0.005858" ixy="4e-06" iyz="1e-06" ixz="0.000429"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.0278 0.209699 -1.466723" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SrR_SwR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.0278 0.209699 -1.466723" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SrR_SwR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_SwR_EpR_1">
+  <inertial>
+    <origin xyz="-0.0013149779392362553 -0.0003855352585169225 -0.17093128500944244" rpy="0 0 0"/>
+    <mass value="1.1759092721014746"/>
+    <inertia ixx="0.016611" iyy="0.016744" izz="0.001139" ixy="2e-06" iyz="-0.000247" ixz="4.4e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-9.1e-05 0.209708 -1.31974" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SwR_EpR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-9.1e-05 0.209708 -1.31974" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SwR_EpR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_EpR_WwR_1">
+  <inertial>
+    <origin xyz="-0.0007927277879998574 -0.013265225155666471 -0.1571511316267432" rpy="0 0 0"/>
+    <mass value="1.0819543051029947"/>
+    <inertia ixx="0.011106" iyy="0.011011" izz="0.00086" ixy="-1.3e-05" iyz="-0.000939" ixz="1.4e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.000267 0.187451 -1.016739" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_EpR_WwR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.000267 0.187451 -1.016739" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_EpR_WwR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_WwR_WpR_1">
+  <inertial>
+    <origin xyz="8.282077573986638e-05 -0.02574053864723208 -0.04643498105358601" rpy="0 0 0"/>
+    <mass value="0.23943111633869696"/>
+    <inertia ixx="0.00031" iyy="0.000333" izz="0.000176" ixy="-0.0" iyz="-4.8e-05" ixz="-2e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.00049 0.209719 -0.70174" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WwR_WpR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.00049 0.209719 -0.70174" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WwR_WpR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_WpR_WrR_1">
+  <inertial>
+    <origin xyz="0.011111431993167735 0.0029131547060829155 -0.07788621646649185" rpy="0 0 0"/>
+    <mass value="0.43814560620601667"/>
+    <inertia ixx="0.000668" iyy="0.000577" izz="0.000223" ixy="-1e-06" iyz="1.3e-05" ixz="3.6e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.000553 0.212723 -0.64124" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WpR_WrR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.000553 0.212723 -0.64124" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WpR_WrR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="end_effectorR_1">
+  <inertial>
+    <origin xyz="0.01338776577729049 -0.002672789001431114 -0.1431472934721481" rpy="0 0 0"/>
+    <mass value="0.8062994878545913"/>
+    <inertia ixx="0.003328" iyy="0.003221" izz="0.00066" ixy="8.7e-05" iyz="8e-06" ixz="0.000116"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.004895 0.209769 -0.552312" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/end_effectorR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.004895 0.209769 -0.552312" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/end_effectorR_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_SpL_SrL_1">
+  <inertial>
+    <origin xyz="-0.0007225768306797116 0.056441277568387155 0.001413105516297808" rpy="0 0 0"/>
+    <mass value="1.5824061666559646"/>
+    <inertia ixx="0.005052" iyy="0.002529" izz="0.004478" ixy="-2.1e-05" iyz="-7.7e-05" ixz="-5.9e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.0 -0.1187 -1.46674" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SpL_SrL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.0 -0.1187 -1.46674" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SpL_SrL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_SrL_SwL_1">
+  <inertial>
+    <origin xyz="0.02407309792418489 3.0847766034070023e-06 -0.045099840975151295" rpy="0 0 0"/>
+    <mass value="2.5945539746776944"/>
+    <inertia ixx="0.009463" iyy="0.011492" izz="0.005856" ixy="-4e-06" iyz="-1e-06" ixz="0.000423"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.0278 -0.209699 -1.466771" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SrL_SwL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.0278 -0.209699 -1.466771" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SrL_SwL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_SwL_EpL_1">
+  <inertial>
+    <origin xyz="-0.0016138740169460359 0.00038546524194896237 -0.17092846889218327" rpy="0 0 0"/>
+    <mass value="1.1759095995501911"/>
+    <inertia ixx="0.016611" iyy="0.016744" izz="0.001139" ixy="-2e-06" iyz="0.000247" ixz="1.7e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.000165 -0.209708 -1.31974" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SwL_EpL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.000165 -0.209708 -1.31974" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_SwL_EpL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_EpL_WwL_1">
+  <inertial>
+    <origin xyz="-0.0010927223820738925 0.017572341589824986 -0.1748232027177956" rpy="0 0 0"/>
+    <mass value="2.009636142913342"/>
+    <inertia ixx="0.015338" iyy="0.015252" izz="0.001345" ixy="4e-06" iyz="0.000955" ixz="-6.1e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.000518 -0.187451 -1.016739" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_EpL_WwL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.000518 -0.187451 -1.016739" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_EpL_WwL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_WwL_WpL_1">
+  <inertial>
+    <origin xyz="1.6140756940235743e-06 0.02574053680763541 -0.0464347481510653" rpy="0 0 0"/>
+    <mass value="0.23943109260565526"/>
+    <inertia ixx="0.00031" iyy="0.000333" izz="0.000176" ixy="0.0" iyz="4.8e-05" ixz="-2e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.000845 -0.209719 -0.70174" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WwL_WpL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.000845 -0.209719 -0.70174" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WwL_WpL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="link_WpL_WrL_1">
+  <inertial>
+    <origin xyz="0.010975709884834768 -0.0029131970925544426 -0.07790636428311548" rpy="0 0 0"/>
+    <mass value="0.4381445358441869"/>
+    <inertia ixx="0.000668" iyy="0.000577" izz="0.000223" ixy="1e-06" iyz="-1.3e-05" ixz="3.6e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.000888 -0.212723 -0.641241" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WpL_WrL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.000888 -0.212723 -0.641241" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/link_WpL_WrL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="end_effectorL_1">
+  <inertial>
+    <origin xyz="0.014884493021504377 0.0016894150128548557 -0.14467231554424292" rpy="0 0 0"/>
+    <mass value="0.7980271543010237"/>
+    <inertia ixx="0.003155" iyy="0.003049" izz="0.000659" ixy="-8.7e-05" iyz="-2.8e-05" ixz="0.0001"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.007991 -0.20978 -0.552323" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/end_effectorL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.007991 -0.20978 -0.552323" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/end_effectorL_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Neck_rotation_1">
+  <inertial>
+    <origin xyz="-0.010201542846740796 -0.02123169522019839 0.018559979556540984" rpy="0 0 0"/>
+    <mass value="0.17606974801006525"/>
+    <inertia ixx="0.000295" iyy="6.8e-05" izz="0.000323" ixy="-1.3e-05" iyz="1.9e-05" ixz="6e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.0545 0.0 -1.59674" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Neck_rotation_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.0545 0.0 -1.59674" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Neck_rotation_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Camera_1">
+  <inertial>
+    <origin xyz="-0.0019125250737630078 0.029158326172674266 0.040007922998117174" rpy="0 0 0"/>
+    <mass value="0.23948990546090554"/>
+    <inertia ixx="0.00055" iyy="7.9e-05" izz="0.000527" ixy="0.0" iyz="-7e-06" ixz="3e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.055052 0.032218 -1.62014" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Camera_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.055052 0.032218 -1.62014" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://featherbot_description/meshes/Camera_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<joint name="BwR" type="revolute">
+  <origin xyz="0.11 -0.13 0.1405" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Drive_Bracket_1"/>
+  <axis xyz="0.0 -0.0 1.0"/>
+  <limit upper="1.570796" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="BwL" type="revolute">
+  <origin xyz="0.11 0.13 0.1405" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Drive_Bracket_2"/>
+  <axis xyz="0.0 -0.0 1.0"/>
+  <limit upper="1.570796" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="BwC" type="revolute">
+  <origin xyz="-0.115167 0.0 0.1405" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Drive_Bracket_3"/>
+  <axis xyz="0.0 -0.0 1.0"/>
+  <limit upper="1.570796" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="BpR" type="continuous">
+  <origin xyz="0.0 -0.0321 -0.0805" rpy="0 0 0"/>
+  <parent link="Drive_Bracket_1"/>
+  <child link="Drive_Wheel_1"/>
+  <axis xyz="-0.0 1.0 -0.0"/>
+</joint>
+
+<joint name="BpL" type="continuous">
+  <origin xyz="0.0 -0.2921 -0.0805" rpy="0 0 0"/>
+  <parent link="Drive_Bracket_2"/>
+  <child link="Drive_Wheel_2"/>
+  <axis xyz="-0.0 -1.0 0.0"/>
+</joint>
+
+<joint name="BpC" type="continuous">
+  <origin xyz="0.225167 -0.1621 -0.0805" rpy="0 0 0"/>
+  <parent link="Drive_Bracket_3"/>
+  <child link="Drive_Wheel_3"/>
+  <axis xyz="-0.0 1.0 0.0"/>
+</joint>
+
+<joint name="TvC" type="prismatic">
+  <origin xyz="0.06125 0.0 0.633575" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Torso_1"/>
+  <axis xyz="0.0 0.0 1.0"/>
+  <limit upper="0.0" lower="0.0" effort="100" velocity="100"/>
+</joint>
+
+<joint name="SpR" type="revolute">
+  <origin xyz="-0.06125 -0.1187 0.833165" rpy="0 0 0"/>
+  <parent link="Torso_1"/>
+  <child link="link_SpR_SrR_1"/>
+  <axis xyz="-0.0 1.0 -0.0"/>
+  <limit upper="0.017453" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="SrR" type="revolute">
+  <origin xyz="-0.0278 -0.090999 -1.7e-05" rpy="0 0 0"/>
+  <parent link="link_SpR_SrR_1"/>
+  <child link="link_SrR_SwR_1"/>
+  <axis xyz="1.0 0.0 0.000622"/>
+  <limit upper="0.087266" lower="-0.610865" effort="100" velocity="100"/>
+</joint>
+
+<joint name="SwR" type="revolute">
+  <origin xyz="0.027891 -9e-06 -0.146983" rpy="0 0 0"/>
+  <parent link="link_SrR_SwR_1"/>
+  <child link="link_SwR_EpR_1"/>
+  <axis xyz="-0.000622 5.9e-05 1.0"/>
+  <limit upper="0.017453" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="EpR" type="revolute">
+  <origin xyz="0.000176 0.022257 -0.303001" rpy="0 0 0"/>
+  <parent link="link_SwR_EpR_1"/>
+  <child link="link_EpR_WwR_1"/>
+  <axis xyz="0.00057 -1.0 5.9e-05"/>
+  <limit upper="2.094395" lower="-0.017453" effort="100" velocity="100"/>
+</joint>
+
+<joint name="WwR" type="revolute">
+  <origin xyz="0.000223 -0.022268 -0.314999" rpy="0 0 0"/>
+  <parent link="link_EpR_WwR_1"/>
+  <child link="link_WwR_WpR_1"/>
+  <axis xyz="-0.000668 5.9e-05 1.0"/>
+  <limit upper="0.785398" lower="-2.356194" effort="100" velocity="100"/>
+</joint>
+
+<joint name="WpR" type="revolute">
+  <origin xyz="6.3e-05 -0.003004 -0.0605" rpy="0 0 0"/>
+  <parent link="link_WwR_WpR_1"/>
+  <child link="link_WpR_WrR_1"/>
+  <axis xyz="0.007485 -0.999972 6.4e-05"/>
+  <limit upper="0.785398" lower="-0.785398" effort="100" velocity="100"/>
+</joint>
+
+<joint name="WrR" type="revolute">
+  <origin xyz="-0.005448 0.002954 -0.088928" rpy="0 0 0"/>
+  <parent link="link_WpR_WrR_1"/>
+  <child link="end_effectorR_1"/>
+  <axis xyz="-0.999972 -0.007485 -0.000837"/>
+  <limit upper="0.785398" lower="-0.785398" effort="100" velocity="100"/>
+</joint>
+
+<joint name="SpL" type="revolute">
+  <origin xyz="-0.06125 0.1187 0.833165" rpy="0 0 0"/>
+  <parent link="Torso_1"/>
+  <child link="link_SpL_SrL_1"/>
+  <axis xyz="-0.0 1.0 -0.0"/>
+  <limit upper="0.017453" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="SrL" type="revolute">
+  <origin xyz="-0.0278 0.090999 3.1e-05" rpy="0 0 0"/>
+  <parent link="link_SpL_SrL_1"/>
+  <child link="link_SrL_SwL_1"/>
+  <axis xyz="-0.999999 0.0 0.001124"/>
+  <limit upper="0.087266" lower="-0.610865" effort="100" velocity="100"/>
+</joint>
+
+<joint name="SwL" type="revolute">
+  <origin xyz="0.027635 9e-06 -0.147031" rpy="0 0 0"/>
+  <parent link="link_SrL_SwL_1"/>
+  <child link="link_SwL_EpL_1"/>
+  <axis xyz="-0.001124 5.9e-05 -0.999999"/>
+  <limit upper="0.017453" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="EpL" type="revolute">
+  <origin xyz="-0.000353 -0.022257 -0.303001" rpy="0 0 0"/>
+  <parent link="link_SwL_EpL_1"/>
+  <child link="link_EpL_WwL_1"/>
+  <axis xyz="-0.00057 -1.0 -5.8e-05"/>
+  <limit upper="2.094395" lower="-0.017453" effort="100" velocity="100"/>
+</joint>
+
+<joint name="WwL" type="revolute">
+  <origin xyz="-0.000327 0.022268 -0.314999" rpy="0 0 0"/>
+  <parent link="link_EpL_WwL_1"/>
+  <child link="link_WwL_WpL_1"/>
+  <axis xyz="-0.001077 5.9e-05 -0.999999"/>
+  <limit upper="0.785398" lower="-2.356194" effort="100" velocity="100"/>
+</joint>
+
+<joint name="WpL" type="revolute">
+  <origin xyz="-4.3e-05 0.003004 -0.060499" rpy="0 0 0"/>
+  <parent link="link_WwL_WpL_1"/>
+  <child link="link_WpL_WrL_1"/>
+  <axis xyz="-0.007485 -0.999972 -5.1e-05"/>
+  <limit upper="0.785398" lower="-0.785398" effort="100" velocity="100"/>
+</joint>
+
+<joint name="WrL" type="revolute">
+  <origin xyz="-0.007103 -0.002943 -0.088918" rpy="0 0 0"/>
+  <parent link="link_WpL_WrL_1"/>
+  <child link="end_effectorL_1"/>
+  <axis xyz="-0.999972 0.007485 0.000908"/>
+  <limit upper="0.785398" lower="-0.785398" effort="100" velocity="100"/>
+</joint>
+
+<joint name="NwC" type="revolute">
+  <origin xyz="-0.00675 0.0 0.963165" rpy="0 0 0"/>
+  <parent link="Torso_1"/>
+  <child link="Neck_rotation_1"/>
+  <axis xyz="0.0 0.0 1.0"/>
+  <limit upper="1.570796" lower="-1.570796" effort="100" velocity="100"/>
+</joint>
+
+<joint name="NpC" type="revolute">
+  <origin xyz="0.000552 -0.032218 0.0234" rpy="0 0 0"/>
+  <parent link="Neck_rotation_1"/>
+  <child link="Camera_1"/>
+  <axis xyz="-8e-06 1.0 -0.0"/>
+  <limit upper="1.570796" lower="-0.523599" effort="100" velocity="100"/>
+</joint>
+
+</robot>
