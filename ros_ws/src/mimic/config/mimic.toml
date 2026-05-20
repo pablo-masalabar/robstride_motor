@@ -5,7 +5,7 @@
 
 mode             = "pp"
 debug            = false
-active_report_hz = 30.0
+active_report_hz = 50.0
 # op_hz          = 30.0   # uncomment to publish at fixed rate instead of passthrough
 
 left_arm_node_prefix  = "/left_arm"
@@ -19,14 +19,14 @@ target_node = "right_arm"
 motors = ["Sp", "Sr", "Sw", "Ep", "Ww", "Wp", "Wr"]
 
 [pp_defaults]
-speed        = 5.0    # rad/s
-acceleration = 5.0    # rad/s²
-deceleration = 5.0    # rad/s²
-torque_limit = 15.0   # N·m
+speed        = 30.0    # rad/s
+acceleration = 25.0    # rad/s²
+deceleration = 25.0    # rad/s²
+torque_limit = 0.0   # N·m
 
 [csp_defaults]
-speed_limit   = 10.0  # rad/s
-current_limit = 20.0  # A
+speed_limit   = 15.0  # rad/s
+current_limit = 0.0  # A
 
 # Transforms applied when target_node = "right_arm" (source = left arm).
 # Keys are base motor names (no L/R suffix).

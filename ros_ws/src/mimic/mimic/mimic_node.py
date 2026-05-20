@@ -96,7 +96,6 @@ class MimicNode(Node):
         self._debug_csp_pubs:   Dict[str, object] = {}
         self._debug_pp_pubs:    Dict[str, object] = {}
         self._active_report_src_client  = None
-        self._active_report_tgt_client  = None
         self._set_run_mode_client       = None
         self._enable_motor_client       = None
 
@@ -179,14 +178,15 @@ class MimicNode(Node):
             self.destroy_subscription(sub)
         self._state_subs.clear()
 
-        # Disable the current target motors before destroying the client
+        # Disable active reporting on old source and motors on old target before destroying clients
+        if self._active_report_src_client is not None and self._active_report_src_client.service_is_ready():
+            self._blocking_set_active_report(self._active_report_src_client, self._source_prefix, enable=False)
         if not self._debug and self._enable_motor_client is not None and self._enable_motor_client.service_is_ready():
             self._blocking_enable_motors(enable=False)
 
         # Tear down previous service clients
         for client in [
             self._active_report_src_client,
-            self._active_report_tgt_client,
             self._set_run_mode_client,
             self._enable_motor_client,
         ]:
@@ -260,11 +260,6 @@ class MimicNode(Node):
             f'{src_prefix}/set_active_report',
             callback_group=self._cb_srvs,
         )
-        self._active_report_tgt_client = self.create_client(
-            SetActiveReport,
-            f'{tgt_prefix}/set_active_report',
-            callback_group=self._cb_srvs,
-        )
         self._set_run_mode_client = self.create_client(
             SetRunMode,
             f'{tgt_prefix}/set_run_mode',
@@ -293,7 +288,6 @@ class MimicNode(Node):
         self._setup_timer = None
 
         self._blocking_set_active_report(self._active_report_src_client, self._source_prefix, enable=True)
-        self._blocking_set_active_report(self._active_report_tgt_client, self._target_prefix, enable=True)
         self._blocking_set_run_mode(self._mode)
         if not self._debug:
             self._blocking_enable_motors(enable=True)
@@ -546,7 +540,6 @@ class MimicNode(Node):
 
         ar_off = self._make_active_report_req(False)
         _call(self._active_report_src_client, ar_off, 'source active reporting disabled')
-        _call(self._active_report_tgt_client, ar_off, 'target active reporting disabled')
         _call(self._enable_motor_client,      self._make_disable_motors_req(), 'target motors disabled')
 
     def _make_active_report_req(self, enable: bool) -> SetActiveReport.Request:
