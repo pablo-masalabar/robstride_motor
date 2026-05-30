@@ -1,0 +1,36 @@
+# Damiao DM-J4310-2EC motor configuration
+# All positions in radians (output shaft).
+# Velocity in rad/s, acceleration in rad/s², torque in N·m.
+
+[defaults]
+node_name                   = "damiao"
+use_node_name_as_topic_base = true    # false → topics at root namespace
+master_id                   = 0       # host CAN ID; must match MST_ID register on motors
+channel                     = "can0"
+bustype                     = "socketcan"
+bitrate                     = 1000000 # 1 Mbps
+rx_timeout                  = 0.05    # parameter read reply timeout (s)
+update_rate_hz              = 100.0   # JointState publish rate (Hz)
+operation_mode              = "POSITION_VELOCITY"  # MIT | POSITION_VELOCITY | VELOCITY | FORCE_POSITION_HYBRID
+
+[joint_1]
+type                = "J4310_2EC"
+motor_id            = 1
+joint_limit_min     = -3.1416    # output shaft rad
+joint_limit_max     =  3.1416
+motor_homing_pos    =  0.0       # subtracted from feedback to give user-frame position
+max_vel             =  10.0      # rad/s clamp on velocity commands
+max_accel           =  5.0       # rad/s² clamp on acceleration commands
+max_decel           =  5.0       # rad/s² clamp on deceleration commands
+# Motion profile registers written to motor at startup
+acc                 =  5.0       # ACC  (0x04) – acceleration ramp rad/s²
+dec                 =  5.0       # DEC  (0x05) – deceleration magnitude rad/s² (stored as negative)
+max_spd             =  10.0      # MAX_SPD (0x06) – velocity cap rad/s
+# Control gains written at startup
+kp_apr              =  20.0      # position loop Kp  (KP_APR 0x1B)
+ki_apr              =  0.1       # position loop Ki  (KI_APR 0x1C)
+kp_asr              =  0.5       # velocity loop Kp  (KP_ASR 0x19)
+ki_asr              =  0.01      # velocity loop Ki  (KI_ASR 0x1A)
+# MIT mode gains applied per-command (not written to registers)
+kp                  =  30.0      # position proportional gain [0, 500]
+kd                  =  0.5       # velocity derivative gain   [0, 5]
