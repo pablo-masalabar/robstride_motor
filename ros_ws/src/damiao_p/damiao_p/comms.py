@@ -54,13 +54,18 @@ class _SafeNotifier(can.Notifier):
 
 class _DamiaoDispatcher(can.Listener):
     """
-    Broadcasts every reply frame (ID = master_id) to all registered motor callbacks.
+    Broadcasts every reply frame to all registered motor callbacks.
+
+    When master_id is an int, only frames whose arbitration_id matches are
+    forwarded (normal motor-node operation).  When master_id is None the
+    arbitration_id check is skipped — used by the scan script where the
+    motor's MST_ID register value is unknown.
 
     Motor callbacks are responsible for filtering frames that belong to them
     by inspecting D[0].
     """
 
-    def __init__(self, master_id: int) -> None:
+    def __init__(self, master_id: Optional[int]) -> None:
         self._master_id = master_id
         self._callbacks: List[Callable[[can.Message], None]] = []
 
@@ -70,7 +75,7 @@ class _DamiaoDispatcher(can.Listener):
     def on_message_received(self, msg: can.Message) -> None:
         if msg.is_error_frame or msg.is_extended_id:
             return
-        if msg.arbitration_id != self._master_id:
+        if self._master_id is not None and msg.arbitration_id != self._master_id:
             return
         for cb in self._callbacks:
             cb(msg)
@@ -98,7 +103,7 @@ class DamiaoCANComms:
             on_error:   Optional callback invoked when the Notifier thread catches
                         a bus exception.
         """
-        self.master_id       = master_id
+        self.master_id       = master_id  # None → promiscuous (scan) mode
         self.rx_timeout      = rx_timeout
         self._error_callback = on_error
         self._bus = can.interface.Bus(
@@ -143,13 +148,22 @@ class DamiaoCANComms:
         """
         self._dispatcher.register(callback)
         if not self._filter_set:
-            filt = {"can_id": self.master_id, "can_mask": 0x7FF, "extended": False}
-            self._bus.set_filters([filt])
+            if self.master_id is not None:
+                # Known master_id: install a hardware filter so only reply frames
+                # reach the dispatcher.  Skipped when master_id is None (scan mode)
+                # so the dispatcher receives all standard frames and filters in software.
+                filt = {"can_id": self.master_id, "can_mask": 0x7FF, "extended": False}
+                self._bus.set_filters([filt])
             self._filter_set = True
 
     def clear_filters(self) -> None:
-        """Remove all receive filters — accept every frame on the bus."""
-        self._bus.set_filters(None)
+        """Remove all receive filters — accept every standard frame on the bus.
+
+        Uses a catch-all mask=0 filter rather than set_filters(None) because
+        python-can's socketcan treats None as "reject all" in some versions.
+        The dispatcher still filters by master_id and frame type in software.
+        """
+        self._bus.set_filters([{"can_id": 0, "can_mask": 0, "extended": False}])
         self._filter_set = False
 
     # ── Background listener ────────────────────────────────────────────────

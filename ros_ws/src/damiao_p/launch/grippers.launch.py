@@ -10,7 +10,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('damiao_p')
 
-    default_config = os.path.join(pkg_share, 'config', 'config.toml')
+    default_config = os.path.join(pkg_share, 'config', 'grippers.toml')
 
     config_arg = DeclareLaunchArgument(
         'config',

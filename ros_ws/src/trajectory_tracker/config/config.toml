@@ -7,19 +7,26 @@ package_path = "/home/neuralpilot/anuj/ros_ws/src/trajectory_tracker"
 left_arm_node_prefix  = "/left_arm"
 right_arm_node_prefix = "/right_arm"
 
+left_gripper_node_prefix  = "/grippers"
+right_gripper_node_prefix = "/grippers"
+
 active_report_hz      = 30.0
 trajectory_record_hz  = 30.0
 replay_hz             = 30.0
 
 replay_motor_mode = "pp"
 
-# Physical left arm motors (these are the recording/leader motors in this config)
-left_arm_motors = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
+# Physical left arm motors (robstride)
+left_arm_motors  = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
 
-# Physical right arm motors (these are the replay/follower motors in this config)
+# Physical right arm motors (robstride)
 right_arm_motors = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
 
-# recording motor → replay motor (left records → right replays)
+# Physical gripper motors (damiao) — recorded and replayed alongside arm motors
+left_gripper_motors  = ["AgL"]
+right_gripper_motors = ["AgR"]
+
+# Robstride: recording motor → replay motor
 [motor_map]
 SpL = "SpR"
 SrL = "SrR"
@@ -29,7 +36,11 @@ WwL = "WwR"
 WpL = "WpR"
 WrL = "WrR"
 
-# Keys are base motor names (no L/R suffix) — direction-independent
+# Damiao: recording gripper → replay gripper
+[damiao_motor_map]
+AgL = "AgR"
+
+# Robstride transforms — keys are base names (no L/R suffix)
 [transform_map]
 Sp = "negate"
 Sr = "negate"
@@ -48,6 +59,13 @@ Ww = "negate"
 Wp = "negate"
 Wr = "passthrough"
 
+# Damiao gripper transforms — keys are base names (no L/R suffix)
+[damiao_transform_map]
+Ag = "passthrough"
+
+[damiao_inverse_transform_map]
+Ag = "passthrough"
+
 [pp_defaults]
 speed        = 15.0
 acceleration = 10.0
@@ -57,3 +75,6 @@ torque_limit = 25.0
 [csp_defaults]
 speed_limit   = 15.0
 current_limit = 0.0
+
+[damiao_pv_defaults]
+speed = 5.0    # rad/s — acc/dec set via motor registers at startup

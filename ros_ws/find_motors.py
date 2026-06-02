@@ -1,92 +1,142 @@
 #!/usr/bin/env python3
-"""Scan a SocketCAN bus for RobStride motors.
-
-Usage:
-    python3 find_motors.py can0
-    python3 find_motors.py can0 --min 0 --max 127 --timeout 0.05
-"""
 
 import argparse
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/robstride_p'))
-
-from robstride_p.comms import CANComms
-from robstride_p.motor_base import RobStrideMotorBase, ParamIndex
-
-# Infer model from factory-default LIMIT_CUR.
-# RS01 and RS02 share the same current limit — only V_MAX differs (needs motion to measure).
-# Values are approximate; unreliable if the user has already changed LIMIT_CUR.
-_CURRENT_TO_MODEL = [
-    (15,  'RS05'),   # factory ~11 A
-    (35,  'RS01/RS02'),  # factory ~23 A
-    (60,  'RS03'),   # factory ~43 A
-    (float('inf'), 'RS04'),  # factory ~90 A
-]
+import time
+import can
 
 
-def _guess_model(current_limit_a: float) -> str:
-    for threshold, model in _CURRENT_TO_MODEL:
-        if current_limit_a <= threshold:
-            return model
-    return 'unknown'
+READ_PARAM_CAN_ID = 0x7FF
+READ_CMD = 0x33
+
+# Register 0x0E = firmware version, read-only.
+# Reading it is a safe way to check if a motor exists.
+RID_SW_VERSION = 0x0E
 
 
-def scan(channel: str, id_min: int, id_max: int, timeout: float) -> list:
-    comms = CANComms(channel=channel, bitrate=1_000_000)
-    comms.start_listener()
-    found = []
+def make_read_param_msg(target_id: int, rid: int) -> can.Message:
+    """
+    Damiao read parameter frame:
+    CAN ID: 0x7FF
+    Data:
+      D0 = CANID_L
+      D1 = CANID_H
+      D2 = 0x33
+      D3 = RID
+    """
+    data = [
+        target_id & 0xFF,
+        (target_id >> 8) & 0xFF,
+        READ_CMD,
+        rid & 0xFF,
+    ]
 
-    try:
-        for motor_id in range(id_min, id_max + 1):
-            print(f'\rScanning ID {motor_id:3d}/{id_max} …', end='', flush=True)
+    return can.Message(
+        arbitration_id=READ_PARAM_CAN_ID,
+        data=data,
+        is_extended_id=False,
+    )
 
-            motor = RobStrideMotorBase(motor_id=motor_id, comms=comms, rx_timeout=timeout)
 
-            # GET_DEVICE_ID (type-0) is the lightest possible query
-            device_id = motor.get_device_id()
+def parse_response(msg: can.Message, rid: int):
+    """
+    Expected response:
+    CAN ID: MST_ID
+    Data:
+      D0 = CANID_L
+      D1 = CANID_H
+      D2 = 0x33
+      D3 = RID
+      D4-D7 = data
+    """
+    if msg.is_extended_id:
+        return None
 
-            if device_id is not None:
-                mech_pos    = motor.read_param_float(ParamIndex.MECH_POS)
-                limit_cur   = motor.read_param_float(ParamIndex.LIMIT_CUR)
-                pos_str     = f'{mech_pos:.4f} rad' if mech_pos is not None else 'n/a'
-                model_guess = _guess_model(limit_cur) if limit_cur is not None else 'unknown'
-                cur_str     = f'{limit_cur:.1f} A' if limit_cur is not None else 'n/a'
-                print(f'\r  [FOUND] motor_id={motor_id:3d}  '
-                      f'model≈{model_guess}  limit_cur={cur_str}  '
-                      f'mech_pos={pos_str}  device_id={device_id.hex()}')
-                found.append(motor_id)
+    if len(msg.data) < 4:
+        return None
 
-    finally:
-        comms.stop_listener()
-        comms.close()
+    if msg.data[2] != READ_CMD:
+        return None
 
-    return found
+    if msg.data[3] != rid:
+        return None
+
+    motor_id = msg.data[0] | (msg.data[1] << 8)
+
+    value = None
+    if len(msg.data) >= 8:
+        value = int.from_bytes(bytes(msg.data[4:8]), byteorder="little", signed=False)
+
+    return motor_id, value, msg.arbitration_id
+
+
+def scan_motor_ids(interface: str, start_id: int, end_id: int, timeout: float):
+    detected = {}
+
+    with can.interface.Bus(channel=interface, bustype="socketcan") as bus:
+        print(f"Scanning Damiao motors on {interface} from ID {start_id} to {end_id}...")
+
+        for motor_id in range(start_id, end_id + 1):
+            msg = make_read_param_msg(motor_id, RID_SW_VERSION)
+
+            try:
+                bus.send(msg)
+            except can.CanError as e:
+                print(f"Failed to send CAN frame for ID {motor_id}: {e}")
+                continue
+
+            start_time = time.time()
+
+            while time.time() - start_time < timeout:
+                rx = bus.recv(timeout=timeout)
+
+                if rx is None:
+                    break
+
+                parsed = parse_response(rx, RID_SW_VERSION)
+                if parsed is None:
+                    continue
+
+                detected_id, fw_version, feedback_can_id = parsed
+
+                if detected_id == motor_id:
+                    detected[detected_id] = {
+                        "firmware_version": fw_version,
+                        "feedback_can_id": feedback_can_id,
+                    }
+                    print(
+                        f"Motor detected: ID={detected_id} "
+                        f"(0x{detected_id:X}), feedback CAN ID=0x{feedback_can_id:X}, "
+                        f"firmware/register value={fw_version}"
+                    )
+                    break
+
+        if not detected:
+            print("No motor detected.")
+        else:
+            print("\nDetected motor IDs:")
+            for motor_id in sorted(detected.keys()):
+                print(f"  ID {motor_id} / 0x{motor_id:X}")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Scan a SocketCAN bus for RobStride motors'
-    )
-    parser.add_argument('channel',
-                        help='SocketCAN interface name, e.g. can0')
-    parser.add_argument('--min', type=int, default=0,
-                        help='First motor ID to scan (default: 0)')
-    parser.add_argument('--max', type=int, default=127,
-                        help='Last motor ID to scan (default: 127)')
-    parser.add_argument('--timeout', type=float, default=0.05,
-                        help='Per-motor response timeout in seconds (default: 0.05)')
+    parser = argparse.ArgumentParser(description="Find Damiao DM-J4310 motor CAN ID.")
+    parser.add_argument("--interface", "-i", default="can0", help="SocketCAN interface, default: can0")
+    parser.add_argument("--start-id", type=int, default=0, help="Start CAN ID, default: 0")
+    parser.add_argument("--end-id", type=int, default=15, help="End CAN ID, default: 15")
+    parser.add_argument("--timeout", type=float, default=0.05, help="Response timeout per ID in seconds")
+
     args = parser.parse_args()
 
-    print(f'Scanning {args.channel}  IDs {args.min}–{args.max}  '
-          f'timeout={args.timeout * 1000:.0f} ms per motor')
-    print()
+    if args.start_id < 0 or args.end_id > 0x7FF or args.start_id > args.end_id:
+        raise ValueError("Invalid ID range. Use 0 to 0x7FF.")
 
-    found = scan(args.channel, args.min, args.max, args.timeout)
+    scan_motor_ids(
+        interface=args.interface,
+        start_id=args.start_id,
+        end_id=args.end_id,
+        timeout=args.timeout,
+    )
 
-    print(f'\nDone — {len(found)} motor(s) found: {found}')
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -116,15 +116,18 @@ class RegAddr(IntEnum):
 
 class FaultCode(IntEnum):
     """ERR field values in the feedback frame D[0] upper nibble."""
-    DISABLED       = 0x0  # Default state after power-on
-    ENABLED        = 0x1  # Normal run state
-    OVER_VOLTAGE   = 0x8
-    UNDER_VOLTAGE  = 0x9
-    OVER_CURRENT   = 0xA
-    MOS_OVER_TEMP  = 0xB  # MOSFET over-temperature
-    COIL_OVER_TEMP = 0xC  # Motor winding over-temperature
-    COMM_LOST      = 0xD
-    OVERLOAD       = 0xE
+    DISABLED          = 0x0  # Default state after power-on
+    ENABLED           = 0x1  # Normal run state
+    SHAFT_CALIB_ERR   = 0x3  # Output shaft calibration error
+    SENSOR_ERR        = 0x4  # Sensor output error
+    MOTOR_CALIB_ERR   = 0x5  # Motor encoder calibration error
+    OVER_VOLTAGE      = 0x8
+    UNDER_VOLTAGE     = 0x9
+    OVER_CURRENT      = 0xA
+    MOS_OVER_TEMP     = 0xB  # MOSFET over-temperature
+    COIL_OVER_TEMP    = 0xC  # Motor winding over-temperature
+    COMM_LOST         = 0xD
+    OVERLOAD          = 0xE
 
 
 # ── Data structures ────────────────────────────────────────────────────────────
@@ -201,37 +204,31 @@ class DamiaoMotorBase:
 
     @staticmethod
     def _float_to_s16(x: float, x_max: float) -> int:
-        """Float → 16-bit two's-complement unsigned (for big-endian packing)."""
-        raw = round(x / x_max * 32767.0)
-        raw = max(-32768, min(32767, raw))
-        return raw & 0xFFFF
+        """Float in [-x_max, +x_max] → 16-bit unsigned (0 = -x_max, 65535 = +x_max)."""
+        raw = round((x + x_max) / (2.0 * x_max) * 65535.0)
+        return max(0, min(65535, raw))
 
     @staticmethod
     def _float_to_s12(x: float, x_max: float) -> int:
-        """Float → 12-bit two's-complement unsigned."""
-        raw = round(x / x_max * 2047.0)
-        raw = max(-2048, min(2047, raw))
-        return raw & 0xFFF
+        """Float in [-x_max, +x_max] → 12-bit unsigned (0 = -x_max, 4095 = +x_max)."""
+        raw = round((x + x_max) / (2.0 * x_max) * 4095.0)
+        return max(0, min(4095, raw))
 
     @staticmethod
     def _float_to_u12(x: float, x_max: float) -> int:
-        """Float → 12-bit unsigned (for Kp, Kd which are non-negative)."""
+        """Float in [0, x_max] → 12-bit unsigned (for Kp, Kd which are non-negative)."""
         raw = round(x / x_max * 4095.0)
         return max(0, min(4095, raw))
 
     @staticmethod
     def _s16_to_float(raw: int, x_max: float) -> float:
-        """16-bit two's-complement unsigned → float."""
-        if raw >= 32768:
-            raw -= 65536
-        return raw / 32767.0 * x_max
+        """16-bit unsigned → float in [-x_max, +x_max] (0 = -x_max, 65535 = +x_max)."""
+        return raw * (2.0 * x_max) / 65535.0 - x_max
 
     @staticmethod
     def _s12_to_float(raw: int, x_max: float) -> float:
-        """12-bit two's-complement unsigned → float."""
-        if raw >= 2048:
-            raw -= 4096
-        return raw / 2047.0 * x_max
+        """12-bit unsigned → float in [-x_max, +x_max] (0 = -x_max, 4095 = +x_max)."""
+        return raw * (2.0 * x_max) / 4095.0 - x_max
 
     # ── Control frame ID ──────────────────────────────────────────────────────
 
@@ -322,7 +319,12 @@ class DamiaoMotorBase:
         return self._feedback
 
     def set_zero_position(self) -> MotorFeedback:
-        """Set current output shaft position as the zero reference."""
+        """Set current output shaft position as the zero reference.
+
+        Writes directly to on-chip flash (0xFE command) — persists across power
+        cycles without a separate save_params() call.  Flash endurance ~10,000
+        cycles; do not call in a tight loop.
+        """
         self._send_ctrl(b'\xff\xff\xff\xff\xff\xff\xff\xfe')
         return self._feedback
 

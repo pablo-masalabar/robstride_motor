@@ -26,6 +26,7 @@ Services
   ~/clear_faults          std_srvs/Trigger
   ~/save_params           std_srvs/Trigger   (disables motor → saves → re-enables)
   ~/homing                std_srvs/Trigger
+  ~/set_active_report     custom_interfaces/SetActiveReport  (query motor at hz, publish to state topic)
 
 Actions
 -------
@@ -76,6 +77,7 @@ from custom_interfaces.srv import (
     Help,
     MotorParam,
     ReadParam,
+    SetActiveReport,
     SetRunMode,
     SetZeroPosition,
     WriteParam,
@@ -195,8 +197,7 @@ class MotorNode(Node):
 
         self._defaults = config.pop('defaults')
         self._update_rate_hz = float(self._defaults['update_rate_hz'])
-        use_node_prefix      = bool(self._defaults.get('use_node_name_as_topic_base', True))
-        self._ns             = '~' if use_node_prefix else ''
+        self._ns             = '~'
 
         self.get_logger().info(
             f'Config loaded from {config_path} ({len(config)} motors) — '
@@ -210,6 +211,7 @@ class MotorNode(Node):
         self._last_err:      Dict[str, int]              = {}
         self._motor_locks:   Dict[str, threading.Lock]   = {}
         self._motor_cfg:     Dict[str, dict]             = {}
+        self._report_timers: Dict[str, object]           = {}  # per-motor active-report timers
 
         self._init_motors(config)
 
@@ -260,6 +262,7 @@ class MotorNode(Node):
         self.create_service(Trigger,         self._topic('clear_faults'),      self._srv_clear_faults,      callback_group=self._cb_services)
         self.create_service(Trigger,         self._topic('save_params'),       self._srv_save_params,       callback_group=self._cb_services)
         self.create_service(Trigger,         self._topic('homing'),            self._srv_homing,            callback_group=self._cb_services)
+        self.create_service(SetActiveReport, self._topic('set_active_report'), self._srv_set_active_report, callback_group=self._cb_services)
 
         # ── Actions ────────────────────────────────────────────────────────
         self._move_action = ActionServer(
@@ -853,6 +856,68 @@ class MotorNode(Node):
                       else 'Errors — ' + ', '.join(failed)
         return res
 
+    def _srv_set_active_report(self, req: SetActiveReport.Request, res: SetActiveReport.Response):
+        """
+        Enable or disable timer-driven motor queries on ~/motors/{name}/state.
+
+        When enabled the node sends an idempotent enable/disable ping to the
+        motor at the requested rate; the motor replies with a fresh feedback
+        frame which _on_feedback then publishes to the state topic.
+
+        Request fields:
+            name   (str)  — motor name or "all"
+            enable (bool) — True to start, False to stop
+            hz     (float)— publish rate when enabling
+        """
+        motors = self._resolve_motors(req.name)
+        if motors is None:
+            res.success = False
+            res.message = f'Motor {req.name!r} not found'
+            return res
+
+        if req.enable and req.hz <= 0.0:
+            res.success = False
+            res.message = f'hz must be > 0 (got {req.hz})'
+            return res
+
+        for name in motors:
+            # Cancel any existing report timer for this motor
+            existing = self._report_timers.get(name)
+            if existing is not None:
+                existing.cancel()
+                self.destroy_timer(existing)
+                self._report_timers[name] = None
+
+            if req.enable:
+                def _make_cb(motor_name: str):
+                    def cb():
+                        motor = self._motors.get(motor_name)
+                        if motor is None:
+                            return
+                        # Idempotent ping: matches current state so nothing
+                        # changes, but the motor always replies with a fresh
+                        # feedback frame which _on_feedback publishes.
+                        with self._motor_locks[motor_name]:
+                            if self._motor_enabled.get(motor_name, False):
+                                motor.enable()
+                            else:
+                                motor.disable()
+                    return cb
+
+                self._report_timers[name] = self.create_timer(
+                    1.0 / req.hz,
+                    _make_cb(name),
+                    callback_group=self._cb_services,
+                )
+
+        res.success = True
+        names = list(motors.keys())
+        if req.enable:
+            res.message = f'Active report started at {req.hz:.1f} Hz for {names}'
+        else:
+            res.message = f'Active report stopped for {names}'
+        return res
+
     # ── Actions ────────────────────────────────────────────────────────────────
 
     def _execute_move_to_position(self, goal_handle) -> MoveToPosition.Result:
@@ -1005,15 +1070,15 @@ class MotorNode(Node):
         msg.over_temp      = err in (FaultCode.MOS_OVER_TEMP, FaultCode.COIL_OVER_TEMP)
         msg.overvoltage    = (err == FaultCode.OVER_VOLTAGE)
         msg.undervoltage   = (err == FaultCode.UNDER_VOLTAGE)
-        msg.a_phase_oc     = (err == FaultCode.OVER_CURRENT)   # general OC mapped here
+        msg.a_phase_oc     = (err == FaultCode.OVER_CURRENT)
         msg.stall_overload = (err == FaultCode.OVERLOAD)
+        msg.encoder_uncal  = err in (FaultCode.SENSOR_ERR, FaultCode.MOTOR_CALIB_ERR)
+        msg.pos_init_fault = (err == FaultCode.SHAFT_CALIB_ERR)
         # Fields with no Damiao equivalent
-        msg.driver_ic      = False
-        msg.b_phase_oc     = False
-        msg.c_phase_oc     = False
-        msg.encoder_uncal  = False
-        msg.hw_id_fault    = False
-        msg.pos_init_fault = False
+        msg.driver_ic         = False
+        msg.b_phase_oc        = False
+        msg.c_phase_oc        = False
+        msg.hw_id_fault       = False
         msg.over_temp_warning = False
         return msg
 
@@ -1021,6 +1086,10 @@ class MotorNode(Node):
 
     def destroy_node(self) -> None:
         print('[motor_node] Shutting down — disabling motors …')
+        for name, tmr in self._report_timers.items():
+            if tmr is not None:
+                tmr.cancel()
+                self.destroy_timer(tmr)
         for name, motor in self._motors.items():
             try:
                 motor.disable()

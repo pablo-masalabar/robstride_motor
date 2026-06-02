@@ -33,8 +33,8 @@ mimic/
 | `op_hz` | If set, publish at this fixed rate using latest state; if absent or `0`, forward on every incoming state message |
 | `[transform_map]` | Transforms applied when `target_node = "right_arm"` (source = left arm). Keys are base names (e.g. `Sp`). |
 | `[inverse_transform_map]` | Transforms applied when `target_node = "left_arm"` (source = right arm). Keys are base names. |
-| `[pp_defaults]` | Default PP parameters: `speed`, `acceleration`, `deceleration`, `torque_limit` |
-| `[csp_defaults]` | Default CSP parameters: `speed_limit`, `current_limit` |
+| `[robstride_pp_defaults]` | Default PP parameters: `speed`, `acceleration`, `deceleration`, `torque_limit` |
+| `[robstride_csp_defaults]` | Default CSP parameters: `speed_limit`, `current_limit` |
 
 ### Direction logic
 
