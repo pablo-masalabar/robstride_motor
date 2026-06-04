@@ -37,10 +37,13 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/TrimTrajectory.srv"
   "srv/EnableMimicMotors.srv"
   "srv/SetMimicTarget.srv"
+  "srv/Freeze.srv"
+  "srv/EnableMotors.srv"
   # Actions
   "action/MoveToPosition.action"
   "action/SetVelocity.action"
   "action/Homing.action"
+  "action/EZMotionHoming.action"
   "action/RecordTrajectory.action"
   "action/ReplayTrajectory.action"
   "action/SimulateTrajectory.action"

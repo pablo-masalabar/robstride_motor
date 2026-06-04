@@ -1,0 +1,6 @@
+string name   # node_name or motor_name; empty = apply to all
+bool   freeze # true = freeze, false = unfreeze
+---
+bool   success
+string message
+bool   frozen  # current freeze state after the call

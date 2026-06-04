@@ -1,0 +1,6 @@
+string name        # node_name or motor_name; empty = apply to all
+bool   enable      # true = enable, false = disable
+bool   clear_fault # clear latched faults when disabling
+---
+bool   success
+string message

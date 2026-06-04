@@ -1,0 +1,12 @@
+# DS402 homing mode action for EZmotion motors.
+# Motor name to home; empty string = home all motors.
+string motor_name
+---
+bool     success
+string   message
+string[] homed_motors
+---
+string  motor_name
+string  phase          # "starting" | "homing" | "complete" | "error"
+float32 elapsed_time
+uint16  statusword
