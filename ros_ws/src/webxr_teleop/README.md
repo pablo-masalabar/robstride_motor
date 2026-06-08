@@ -10,11 +10,13 @@ WebXR Client
     │  feather_pb2.JointStatesArray   (ROS → Zenoh)
     ▼
 webxr_teleop_node
-    ├── Subscribes: /{node}/motors/{motor}/state  (custom_interfaces/MotorState)
-    ├── Publishes:  /{node}/cmd_position_pp        (PositionPPCommand)
-    │              /{node}/cmd_position_csp        (PositionCSPCommand)
-    │              /{node}/cmd_position_pv         (PositionPPCommand)
-    └── Services:  ~/freeze, ~/enable_motors
+    ├── Subscribes: /{node}/motors/{motor}/state           (custom_interfaces/MotorState)
+    │              /{node}/motors/{motor}/processed_state  (custom_interfaces/MotorState)
+    ├── Publishes:  /{node}/cmd_position_pp   (PositionPPCommand)
+    │              /{node}/cmd_position_csp   (PositionCSPCommand)
+    │              /{node}/cmd_position_pv    (PositionPPCommand)
+    │              /{node}/go_to              (std_msgs/Float64)
+    └── Services:  ~/freeze, ~/enable_motors, ~/set_forwarding
 ```
 
 ## Dependencies
@@ -42,12 +44,15 @@ ros2 launch webxr_teleop webxr_teleop.launch.py config_path:=/path/to/config.tom
 | Field | Required | Description |
 |---|---|---|
 | `node_name` | yes | ROS node name |
+| `debug` | no | When `true`, incoming commands are logged but **not** published to motors (default: `false`) |
 | `robstride_motor_mode` | yes | Control mode for robstride motors: `pp` or `csp` |
 | `damiao_motor_mode` | yes | Control mode for damiao motors: `position_velocity`, `mit`, `velocity`, `force_position_hybrid` |
+| `ezmotion_motor_mode` | yes | Control mode for ezmotion motors: `pp`, `pv`, `pt`, `hm`, `csp`, `csv`, `cst` |
 | `joints_state_publish_hz` | yes | Rate at which motor states are published to Zenoh (Hz) |
 | `zenoh_config` | no | Path to a Zenoh JSON5 config file; uses default config if absent |
 | `robstride_active_report_hz` | no | Global active report rate for all robstride nodes (Hz) |
 | `damiao_active_report_hz` | no | Global active report rate for all damiao nodes (Hz) |
+| `ezmotion_active_report_hz` | no | Global active report rate for all ezmotion nodes (Hz) |
 
 ### Motor mode values
 
@@ -61,6 +66,13 @@ ros2 launch webxr_teleop webxr_teleop.launch.py config_path:=/path/to/config.tom
 - `velocity` — Velocity control
 - `force_position_hybrid` — Force+position hybrid
 
+**EZmotion** (`ezmotion_motor_mode`):
+- `pp` — Profile Position (trapezoidal profile, go_to height command)
+- `pv` — Profile Velocity
+- `pt` — Profile Torque
+- `hm` — Homing
+- `csp` / `csv` / `cst` — Cyclic Synchronous Position / Velocity / Torque
+
 ### Default sections
 
 ```toml
@@ -70,11 +82,16 @@ acceleration = 10.0   # rad/s²
 deceleration = 10.0   # rad/s²
 torque_limit = 25.0   # N·m
 
+[ezmotion_pp_defaults]
+speed        = 5.0   # rad/s
+acceleration = 10.0   # rad/s²
+deceleration = 10.0   # rad/s²
+
 [damiao_pv_defaults]
 speed = 5.0    # rad/s
 ```
 
-Both sections and all their fields are required. The node will log a fatal error and exit if any are missing.
+All sections and all their fields are required. The node will log a fatal error and exit if any are missing.
 
 ### Zenoh keys
 
@@ -87,6 +104,7 @@ right_arm_zenoh_key     = "robot/feedback/right_arm"
 left_gripper_zenoh_key  = "robot/feedback/left_gripper"
 right_gripper_zenoh_key = "robot/feedback/right_gripper"
 torso_zenoh_key         = "robot/feedback/torso"
+neck_zenoh_key          = "robot/feedback/neck"
 chassis_zenoh_key       = "robot/feedback/chassis"
 
 # Commands (Zenoh → ROS)
@@ -95,6 +113,7 @@ right_arm_cmd_zenoh_key     = "robot/cmd/right_arm"
 left_gripper_cmd_zenoh_key  = "robot/cmd/left_gripper"
 right_gripper_cmd_zenoh_key = "robot/cmd/right_gripper"
 torso_cmd_zenoh_key         = "robot/cmd/torso"
+neck_cmd_zenoh_key          = "robot/cmd/neck"
 chassis_cmd_zenoh_key       = "robot/cmd/chassis"
 ```
 
@@ -108,7 +127,8 @@ left_arm      = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
 right_arm     = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
 left_gripper  = ["AgL"]
 right_gripper = ["AgR"]
-torso         = ["NpC", "NwC"]
+torso         = ["torso"]
+neck          = ["NpC", "NwC"]
 chassis       = ["BwC", "BwR", "BwL", "BpC", "BpR", "BpL"]
 ```
 
@@ -120,7 +140,7 @@ Each hardware node (arm, gripper, etc.) is declared as a TOML table `[node_name]
 
 | Field | Description |
 |---|---|
-| `active_report_hz` | Enable autonomous motor state push at this rate. Overrides the global `robstride/damiao_active_report_hz`. |
+| `active_report_hz` | Enable autonomous motor state push at this rate. Overrides the global `robstride/damiao/ezmotion_active_report_hz`. |
 | `enable_disable_service_name` | Full service path for enabling/disabling motors. Defaults to `/{node_name}/enable_motor`. |
 
 **Per-motor fields (all required):**
@@ -129,7 +149,7 @@ Each hardware node (arm, gripper, etc.) is declared as a TOML table `[node_name]
 |---|---|
 | `cmd_topic_name` | ROS topic to publish position commands to |
 | `feedback_topic_name` | ROS topic to subscribe for motor state |
-| `motor_type` | `robstride` or `damiao` |
+| `motor_type` | `robstride`, `damiao`, or `ezmotion` |
 
 **Example:**
 
@@ -142,16 +162,26 @@ Each hardware node (arm, gripper, etc.) is declared as a TOML table `[node_name]
 cmd_topic_name      = "/left_arm/cmd_position_pp"
 feedback_topic_name = "/left_arm/motors/SpL/state"
 motor_type          = "robstride"
+
+[torso]
+# active_report_hz            = 30.0
+# enable_disable_service_name = "/ezmotion/enable_motor"
+
+[torso.torso]
+cmd_topic_name      = "/ezmotion/go_to"
+feedback_topic_name = "/ezmotion/motors/torso/processed_state"
+motor_type          = "ezmotion"
 ```
 
 ### Currently configured motors
 
-| Node section | Motors | Type | CAN bus |
+| Node section | Motors | Type | Interface |
 |---|---|---|---|
-| `left_arm` | SpL, SrL, SwL, EpL, WwL, WpL, WrL | robstride | can0 |
-| `right_arm` | SpR, SrR, SwR, EpR, WwR, WpR, WrR | robstride | can2 |
-| `base_and_neck` | BwC, BwR, BwL, BpC, BpR, BpL, NpC, NwC | robstride | can0 |
-| `grippers` | AgL, AgR | damiao | can6 / can4 |
+| `left_arm` | SpL, SrL, SwL, EpL, WwL, WpL, WrL | robstride | CAN |
+| `right_arm` | SpR, SrR, SwR, EpR, WwR, WpR, WrR | robstride | CAN |
+| `base_and_neck` | BwC, BwR, BwL, BpC, BpR, BpL, NpC, NwC | robstride | CAN |
+| `torso` | torso | ezmotion | CAN |
+| `grippers` | AgL, AgR | damiao | CAN |
 
 ## Zenoh Bridge
 
@@ -161,6 +191,8 @@ A timer fires at `joints_state_publish_hz`. For each Zenoh group, it reads the l
 
 Only motors that have received at least one state message are included in the payload — motors with no data are skipped silently.
 
+Gripper positions are normalised to `[0.0, 1.0]` (0 = contracted, 1 = expanded) using `gripper_contracted_val` and `gripper_expanded_val` before publishing. EZmotion positions are published as-is in mm (height).
+
 ### Commands (Zenoh → ROS)
 
 One Zenoh subscriber is declared per group that has a `*_cmd_zenoh_key`. When a `feather_pb2.JointControlArray` payload arrives, the node:
@@ -169,9 +201,10 @@ One Zenoh subscriber is declared per group that has a `*_cmd_zenoh_key`. When a 
 2. Extracts entries with `cmd_type == POSITION`.
 3. For each motor in the group that appears in the payload, checks the freeze state.
 4. If not frozen, publishes the appropriate ROS command message to the motor's `cmd_topic_name`:
-   - `cmd_position_pp` → `PositionPPCommand` (with pp defaults)
-   - `cmd_position_csp` → `PositionCSPCommand` (with csp speed/current limits)
-   - `cmd_position_pv` → `PositionPPCommand` (with damiao pv speed)
+   - `cmd_position_pp` → `PositionPPCommand` (robstride pp defaults)
+   - `cmd_position_csp` → `PositionCSPCommand` (robstride csp defaults)
+   - `cmd_position_pv` → `PositionPPCommand` (damiao pv defaults)
+   - `go_to` → `std_msgs/Float64` (height in mm, ezmotion linear actuator)
 
 ## Services
 
@@ -238,7 +271,7 @@ ros2 service call /webxr_teleop_node/enable_motors custom_interfaces/srv/EnableM
 5. Feedback timer starts at `joints_state_publish_hz`.
 6. A one-shot timer fires after 1 second to call `_setup_once`:
    - Calls `set_active_report` on each node that has `active_report_hz` configured.
-   - Calls `set_run_mode` per motor to put it in the configured control mode (`robstride_motor_mode` / `damiao_motor_mode`).
+   - Calls `set_run_mode` per motor to put it in the configured control mode (`robstride_motor_mode` / `damiao_motor_mode` / `ezmotion_motor_mode`). EZmotion motors use DS402 mode integers directly.
 
 ## Shutdown
 

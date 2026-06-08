@@ -1,7 +1,17 @@
+"""
+webxr_teleop_cli.py — identical to webxr_teleop_node.py but loads config from a path
+given on the command line instead of a ROS parameter.
+
+Usage:
+    ros2 run webxr_teleop webxr_teleop_cli -- --config /path/to/config.toml
+"""
+
+import argparse
 import os
 import signal
 import threading
 import tomllib
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import zenoh
@@ -41,7 +51,6 @@ _EZMOTION_MODE_INT: Dict[str, int] = {
     'cst': 10,
 }
 
-# Infer ROS publisher type from cmd topic suffix
 _CMD_TOPIC_MSG_TYPE = {
     'cmd_position_pp':  PositionPPCommand,
     'cmd_position_csp': PositionCSPCommand,
@@ -49,20 +58,17 @@ _CMD_TOPIC_MSG_TYPE = {
     'go_to':            Float64,
 }
 
+_DEFAULT_CONFIG = Path(__file__).parent / 'config.toml'
+
 
 class WebXRTeleopNode(Node):
 
-    def __init__(self):
+    def __init__(self, config_path: Path):
         super().__init__('webxr_teleop_node')
 
         self._cb_subs  = MutuallyExclusiveCallbackGroup()
         self._cb_srvs  = ReentrantCallbackGroup()
         self._cb_setup = MutuallyExclusiveCallbackGroup()
-
-        self.declare_parameter('config_path', '')
-        config_path = self.get_parameter('config_path').value
-        if not config_path:
-            raise RuntimeError('config_path parameter is required')
 
         cfg = self._load_config(config_path)
 
@@ -85,8 +91,6 @@ class WebXRTeleopNode(Node):
         if self._debug:
             self.get_logger().warning('DEBUG mode enabled — commands will be logged but NOT published')
 
-        # Global active report hz overrides — apply to all nodes of that type unless
-        # the node defines its own active_report_hz
         self._global_robstride_hz: Optional[float] = (
             float(cfg['robstride_active_report_hz']) if 'robstride_active_report_hz' in cfg else None
         )
@@ -115,15 +119,11 @@ class WebXRTeleopNode(Node):
         self._qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self._latest_states: Dict[str, MotorState] = {}
 
-        # Parse node sections — each entry describes one hardware node (arm/gripper group)
-        # Structure: {node_name: {prefix, active_report_hz, enable_service, motors: {motor_name: {...}}}}
         self._nodes: Dict[str, dict] = self._parse_nodes(cfg)
 
-        # Subs / pubs — keyed by motor_name and cmd_topic respectively
         self._feedback_subs: Dict[str, object] = {}
         self._cmd_pubs:      Dict[str, object] = {}
 
-        # Service clients — keyed by service path (deduplicated across nodes sharing a prefix)
         self._active_report_clients: Dict[str, object] = {}
         self._run_mode_clients:      Dict[str, object] = {}
         self._enable_motor_clients:  Dict[str, object] = {}
@@ -168,10 +168,7 @@ class WebXRTeleopNode(Node):
                         self._qos,
                     )
 
-        # Command forwarding — disabled by default; enable via ~/set_forwarding
         self._forwarding_enabled: bool = False
-
-        # Freeze state — set of frozen keys (node_name or motor_name)
         self._frozen: set = set()
         self._freeze_lock = threading.Lock()
 
@@ -194,14 +191,11 @@ class WebXRTeleopNode(Node):
             callback_group=self._cb_srvs,
         )
 
-        # ── Zenoh bridge ──────────────────────────────────────────────────────
         self._joints_state_publish_hz: float = self._resolve_publish_hz(cfg)
         self._zenoh_session = self._open_zenoh_session(cfg.get('zenoh_config'))
 
-        # _zenoh_groups: {group_name: {motors, feedback_key, cmd_key, motor_cmd_topics}}
         self._zenoh_groups: Dict[str, dict] = self._parse_zenoh_groups(cfg)
 
-        # Zenoh → ROS command subscribers (one per group that has a cmd key)
         self._zenoh_cmd_subs: Dict[str, object] = {}
         for group_name, group in self._zenoh_groups.items():
             cmd_key = group['cmd_key']
@@ -215,7 +209,6 @@ class WebXRTeleopNode(Node):
                     f'Zenoh cmd sub [{group_name}]: {cmd_key}'
                 )
 
-        # ROS → Zenoh feedback timer
         self.create_timer(
             1.0 / self._joints_state_publish_hz,
             self._publish_zenoh_feedback,
@@ -250,7 +243,7 @@ class WebXRTeleopNode(Node):
             result[field] = float(sec[field])
         return result
 
-    def _load_config(self, path: str) -> dict:
+    def _load_config(self, path: Path) -> dict:
         try:
             with open(path, 'rb') as f:
                 return tomllib.load(f)
@@ -262,7 +255,6 @@ class WebXRTeleopNode(Node):
             raise
 
     def _parse_nodes(self, cfg: dict) -> Dict[str, dict]:
-        """Extract node sections: top-level dicts that contain at least one motor subtable."""
         nodes: Dict[str, dict] = {}
 
         for section_key, section_val in cfg.items():
@@ -276,10 +268,6 @@ class WebXRTeleopNode(Node):
             if not motors:
                 continue
 
-            # Determine active_report_hz for this node:
-            # 1. per-node override wins
-            # 2. fall back to global per motor-type override
-            # 3. None = no active report configured
             if 'active_report_hz' in section_val:
                 report_hz: Optional[float] = float(section_val['active_report_hz'])
             else:
@@ -337,11 +325,9 @@ class WebXRTeleopNode(Node):
         return session
 
     def _parse_zenoh_groups(self, cfg: dict) -> Dict[str, dict]:
-        """Build zenoh group descriptors from [zenoh_motor_groups] and *_zenoh_key fields."""
         raw = cfg.get('zenoh_motor_groups', {})
         groups: Dict[str, dict] = {}
 
-        # Build a flat motor → cmd_topic lookup from the already-parsed node sections
         motor_cmd_topic: Dict[str, str] = {}
         for node in self._nodes.values():
             for motor_name, motor in node['motors'].items():
@@ -365,14 +351,12 @@ class WebXRTeleopNode(Node):
         return groups
 
     def _gripper_to_zenoh(self, motor_pos: float) -> float:
-        """Motor position (rad) → Zenoh normalised value [0.0, 1.0]."""
         span = self._gripper_expanded_val - self._gripper_contracted_val
         if span == 0.0:
             return 0.0
         return max(0.0, min(1.0, (motor_pos - self._gripper_contracted_val) / span))
 
     def _zenoh_to_gripper(self, cmd: float) -> float:
-        """Zenoh normalised value [0.0, 1.0] → motor position (rad)."""
         cmd = max(0.0, min(1.0, cmd))
         return self._gripper_contracted_val + cmd * (self._gripper_expanded_val - self._gripper_contracted_val)
 
@@ -391,7 +375,6 @@ class WebXRTeleopNode(Node):
         for node_name, node in self._nodes.items():
             prefix = node['prefix']
 
-            # Enable active reporting if hz is configured for this node
             if node['active_report_hz'] is not None:
                 self._set_active_report(
                     self._active_report_clients[prefix],
@@ -400,7 +383,6 @@ class WebXRTeleopNode(Node):
                     hz=node['active_report_hz'],
                 )
 
-            # Put every motor in the configured run mode
             run_client = self._run_mode_clients[prefix]
             if not run_client.wait_for_service(timeout_sec=3.0):
                 self.get_logger().error(f'{prefix}/set_run_mode not available — skipping {node_name}')
@@ -448,14 +430,12 @@ class WebXRTeleopNode(Node):
     # ── Freeze service ────────────────────────────────────────────────────────
 
     def _motor_node_name(self, motor_name: str) -> Optional[str]:
-        """Return the node section name that owns motor_name, or None."""
         for node_name, node in self._nodes.items():
             if motor_name in node['motors']:
                 return node_name
         return None
 
     def _is_frozen(self, motor_name: str) -> bool:
-        """True if motor_name or its parent node is currently frozen."""
         with self._freeze_lock:
             if motor_name in self._frozen:
                 return True
@@ -505,9 +485,7 @@ class WebXRTeleopNode(Node):
     def _srv_enable_motors(self, req: EnableMotors.Request, res: EnableMotors.Response):
         name = req.name.strip()
 
-        # Resolve to a list of (enable_service_path, motor_name) pairs to call
-        calls: list = []  # [(enable_svc, motor_name)]
-
+        calls: list = []
         if not name:
             for node in self._nodes.values():
                 for motor_name in node['motors']:
@@ -671,7 +649,6 @@ class WebXRTeleopNode(Node):
     def _shutdown(self) -> None:
         print('[webxr_teleop] Shutting down …')
 
-        # Disable active reporting on all hardware nodes
         seen_prefixes: set = set()
         for node in getattr(self, '_nodes', {}).values():
             prefix = node['prefix']
@@ -691,7 +668,6 @@ class WebXRTeleopNode(Node):
             done.wait(timeout=2.0)
             print(f'[webxr_teleop] [{prefix}] active report disabled')
 
-        # Undeclare zenoh subscribers and close session
         for group_name, sub in getattr(self, '_zenoh_cmd_subs', {}).items():
             try:
                 sub.undeclare()
@@ -709,8 +685,17 @@ class WebXRTeleopNode(Node):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = WebXRTeleopNode()
+    parser = argparse.ArgumentParser(description='WebXR teleop CLI')
+    parser.add_argument(
+        '--config',
+        type=Path,
+        required=True,
+        help='Path to config TOML',
+    )
+    parsed, ros_args = parser.parse_known_args(args)
+
+    rclpy.init(args=ros_args)
+    node = WebXRTeleopNode(config_path=parsed.config)
 
     executor = MultiThreadedExecutor()
     executor.add_node(node)
