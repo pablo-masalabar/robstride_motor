@@ -10,8 +10,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/robstride_p']),
         ('share/robstride_p',              ['package.xml']),
-        ('share/robstride_p/launch',       glob.glob('launch/*')),
-        ('share/robstride_p/config',       glob.glob('config/*')),
+        ('share/robstride_p/launch',       glob.glob('launch/*.py')),
+        ('share/robstride_p/config',       glob.glob('config/*.toml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
