@@ -1,6 +1,7 @@
 # realsense — RealSense D405 node config
 
-node_name = "realsense"
+node_name      = "realsense"
+cam_frame_name = "realsense"   # TF frame id used in all message headers
 
 # ── Device ────────────────────────────────────────────────────────────────────
 serial = ""           # device serial number; empty = first available device
@@ -13,9 +14,11 @@ enable_depth = true
 color_fps   = 30.0
 depth_fps   = 30.0
 
-# Supported: "480P" (848×480)  "720P" (1280×720)
-color_resolution = "720P"
-depth_resolution = "720P"
+# D405 supported combos: 640×480@30/15/5, 848×480@10/5, 1280×720@color15/depth5
+color_width  = 640
+color_height = 480
+depth_width  = 640
+depth_height = 480
 
 # ── Depth limits ──────────────────────────────────────────────────────────────
 # D405 operating range: ~0.07 m – 0.5 m

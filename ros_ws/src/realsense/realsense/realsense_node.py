@@ -16,8 +16,8 @@ Config (`config/config.toml`)
   enable_depth                 bool   enable depth stream (default true)
   color_fps                    float  colour frame rate (default 30.0)
   depth_fps                    float  depth frame rate (default 30.0)
-  color_resolution             str    "480P" or "720P" (default "720P")
-  depth_resolution             str    "480P" or "720P" (default "720P")
+  color_width / color_height   int    colour resolution (default 640×480)
+  depth_width / depth_height   int    depth resolution  (default 640×480)
   depth_min_m                  float  min depth threshold in metres (default 0.07)
   depth_max_m                  float  max depth threshold in metres (default 0.50)
   align_to_color               bool   align depth to colour frame (default true)
@@ -38,17 +38,15 @@ import pyrealsense2 as rs
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import QoSPresetProfiles
 
 from sensor_msgs.msg import CameraInfo, Image
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_RESOLUTION_MAP = {
-    '480P': (848, 480),
-    '720P': (1280, 720),
-}
+# D405 supported color modes: 640x480@30/15/5, 848x480@10/5, 1280x720@15/10/5
+# D405 supported depth modes: 640x480@30/15/5, 848x480@10/5, 1280x720@5
 
 _RS_DISTORTION_MODEL = {
     rs.distortion.brown_conrady:          'plumb_bob',
@@ -116,21 +114,25 @@ class RealSenseNode(Node):
         cfg = self._load_config(config_path)
 
         self._node_name:                  str   = cfg.get('node_name', 'realsense')
+        self._frame_name:                 str   = cfg.get('cam_frame_name', self._node_name)
         self._serial:                     str   = cfg.get('serial', '')
         self._enable_color:               bool  = bool(cfg.get('enable_color', True))
         self._enable_depth:               bool  = bool(cfg.get('enable_depth', True))
-        self._color_fps:                  float = float(cfg.get('color_fps', 30.0))
-        self._depth_fps:                  float = float(cfg.get('depth_fps', 30.0))
-        self._color_resolution:           tuple = _RESOLUTION_MAP[cfg.get('color_resolution', '720P')]
-        self._depth_resolution:           tuple = _RESOLUTION_MAP[cfg.get('depth_resolution', '720P')]
+        self._color_fps:        float = float(cfg.get('color_fps', 30.0))
+        self._depth_fps:        float = float(cfg.get('depth_fps', 30.0))
+        self._color_resolution: tuple = (int(cfg.get('color_width', 640)), int(cfg.get('color_height', 480)))
+        self._depth_resolution: tuple = (int(cfg.get('depth_width', 640)), int(cfg.get('depth_height', 480)))
         self._enable_color_rectification: bool  = bool(cfg.get('enable_color_rectification', False))
         self._color_rectification_alpha:  float = float(cfg.get('color_rectification_alpha', 0.0))
         self._color_rectification_crop:   bool  = bool(cfg.get('color_rectification_crop', False))
-        self._align_to_color:             bool  = bool(cfg.get('align_to_color', True))
+        self._align_to_color:             bool  = bool(cfg.get('align_to_color', True)) and self._enable_color
         self._depth_min_m:                float = float(cfg.get('depth_min_m', 0.07))
         self._depth_max_m:                float = float(cfg.get('depth_max_m', 0.50))
         self._disconnect_timeout_s:       float = float(cfg.get('disconnect_timeout_s', 5.0))
         self._ns:                         str   = f'/{self._node_name}'
+
+        if bool(cfg.get('align_to_color', True)) and not self._enable_color:
+            self.get_logger().warning('align_to_color=true ignored — color stream is disabled')
 
         # RealSense pipeline state
         self._pipeline:   rs.pipeline        = None
@@ -144,27 +146,36 @@ class RealSenseNode(Node):
         self._temporal     = None
         self._hole_filling = None
 
+        # Depth scale (m/unit) — set from sensor after pipeline start
+        self._depth_scale: float = 0.001
+
         # Intrinsics cache
         self._color_intr:       rs.intrinsics = None
+        self._depth_intr:       rs.intrinsics = None
         self._color_rect_props: dict          = {}
+        self._color_rect_info:  CameraInfo    = None
 
         self._ok   = threading.Event()
         self._stop: threading.Event = None
 
-        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        qos = QoSPresetProfiles.SENSOR_DATA.value
 
-        self._color_pub:      object = None
-        self._color_rect_pub: object = None
-        self._cam_info_pub:   object = None
-        self._depth_pub:      object = None
+        self._color_pub:            object = None
+        self._color_rect_pub:       object = None
+        self._cam_info_pub:         object = None
+        self._cam_info_rect_pub:    object = None
+        self._depth_pub:            object = None
+        self._depth_info_pub:       object = None
 
         if self._enable_color:
             self._color_pub    = self.create_publisher(Image,      f'{self._ns}/color/image_raw',   qos)
             self._cam_info_pub = self.create_publisher(CameraInfo, f'{self._ns}/color/camera_info', qos)
             if self._enable_color_rectification:
-                self._color_rect_pub = self.create_publisher(Image, f'{self._ns}/color/image_rect', qos)
+                self._color_rect_pub    = self.create_publisher(Image,      f'{self._ns}/color/image_rect',        qos)
+                self._cam_info_rect_pub = self.create_publisher(CameraInfo, f'{self._ns}/color/camera_info_rect',  qos)
         if self._enable_depth:
-            self._depth_pub = self.create_publisher(Image, f'{self._ns}/depth/image_raw', qos)
+            self._depth_pub      = self.create_publisher(Image,      f'{self._ns}/depth/image_raw',   qos)
+            self._depth_info_pub = self.create_publisher(CameraInfo, f'{self._ns}/depth/camera_info', qos)
 
         self.get_logger().info(
             f'Starting RealSense D405 — serial={self._serial or "any"}  '
@@ -220,7 +231,31 @@ class RealSenseNode(Node):
             )
             self._color_rect_props = {'K': K, 'K_rect': K_rect, 'dist': dist, 'roi': roi}
 
+            # Rectified CameraInfo: zero distortion, K_rect as camera matrix
+            x, y, rw, rh = roi
+            out_w = rw if self._color_rectification_crop else intr.width
+            out_h = rh if self._color_rectification_crop else intr.height
+            fx, fy = float(K_rect[0, 0]), float(K_rect[1, 1])
+            cx, cy = float(K_rect[0, 2]), float(K_rect[1, 2])
+            info = CameraInfo()
+            info.width           = out_w
+            info.height          = out_h
+            info.distortion_model = 'plumb_bob'
+            info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+            info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+            info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+            self._color_rect_info = info
+
     def _init_depth(self) -> None:
+        depth_sensor = self._profile.get_device().first_depth_sensor()
+        self._depth_scale: float = depth_sensor.get_depth_scale()
+        self.get_logger().info(f'Depth scale: {self._depth_scale} m/unit')
+
+        self._depth_intr = rs.video_stream_profile(
+            self._profile.get_stream(rs.stream.depth)
+        ).get_intrinsics()
+
         self._decimation = rs.decimation_filter()
         self._decimation.set_option(rs.option.filter_magnitude, 1)
 
@@ -250,11 +285,11 @@ class RealSenseNode(Node):
         img = np.asanyarray(color_frame.get_data())
 
         self._color_pub.publish(
-            _np_to_ros_image(img, 'bgr8', stamp, f'{self._node_name}_color')
+            _np_to_ros_image(img, 'bgr8', stamp, self._frame_name)
         )
         if self._color_intr is not None:
             self._cam_info_pub.publish(
-                _rs_intrinsics_to_camera_info(self._color_intr, stamp, f'{self._node_name}_color')
+                _rs_intrinsics_to_camera_info(self._color_intr, stamp, self._frame_name)
             )
 
         if not self._enable_color_rectification or not self._color_rect_props:
@@ -271,8 +306,12 @@ class RealSenseNode(Node):
             x, y, w, h = props['roi']
             img_rect = img_rect[y:y + h, x:x + w]
         self._color_rect_pub.publish(
-            _np_to_ros_image(img_rect, 'bgr8', stamp, f'{self._node_name}_color_rect')
+            _np_to_ros_image(img_rect, 'bgr8', stamp, self._frame_name)
         )
+        if self._color_rect_info is not None:
+            self._color_rect_info.header.stamp    = stamp
+            self._color_rect_info.header.frame_id = self._frame_name
+            self._cam_info_rect_pub.publish(self._color_rect_info)
 
     def _depth_cb(self, depth_frame: rs.depth_frame, stamp) -> None:
         f = self._decimation.process(depth_frame)
@@ -281,10 +320,14 @@ class RealSenseNode(Node):
         f = self._temporal.process(f)
         f = self._hole_filling.process(f).as_depth_frame()
 
-        depth_m = np.asanyarray(f.get_data()).astype(np.float32) / 1000.0
+        depth_m = np.asanyarray(f.get_data()).astype(np.float32) * self._depth_scale
         self._depth_pub.publish(
-            _np_to_ros_image(depth_m, '32FC1', stamp, f'{self._node_name}_depth')
+            _np_to_ros_image(depth_m, '32FC1', stamp, self._frame_name)
         )
+        if self._depth_intr is not None:
+            self._depth_info_pub.publish(
+                _rs_intrinsics_to_camera_info(self._depth_intr, stamp, self._frame_name)
+            )
 
     # ── Capture loop ──────────────────────────────────────────────────────────
 
@@ -328,7 +371,7 @@ class RealSenseNode(Node):
 
             if self._enable_color:
                 cf = frames.get_color_frame()
-                if cf and cf.is_valid():
+                if cf:
                     try:
                         self._color_cb(cf, stamp)
                     except Exception:
@@ -336,7 +379,7 @@ class RealSenseNode(Node):
 
             if self._enable_depth:
                 df = frames.get_depth_frame()
-                if df and df.is_valid():
+                if df:
                     try:
                         self._depth_cb(df, stamp)
                     except Exception:
@@ -362,17 +405,22 @@ class RealSenseNode(Node):
             if self._enable_depth:
                 w, h = self._depth_resolution
                 cfg.enable_stream(rs.stream.depth, w, h, rs.format.z16, int(self._depth_fps))
-                cfg.enable_stream(rs.stream.infrared, 1, w, h, rs.format.y8, int(self._depth_fps))
-                cfg.enable_stream(rs.stream.infrared, 2, w, h, rs.format.y8, int(self._depth_fps))
 
             self._profile = self._pipeline.start(cfg)
 
             dev = self._profile.get_device()
+            usb = dev.get_info(rs.camera_info.usb_type_descriptor)
             self.get_logger().info(
                 f'Connected: {dev.get_info(rs.camera_info.name)} '
                 f'serial={dev.get_info(rs.camera_info.serial_number)} '
-                f'fw={dev.get_info(rs.camera_info.firmware_version)}'
+                f'fw={dev.get_info(rs.camera_info.firmware_version)} '
+                f'usb={usb}'
             )
+            if not usb.startswith('3'):
+                self.get_logger().warning(
+                    f'USB {usb} detected — D405 requires USB 3.x to stream; '
+                    f'frames will time out on USB 2.x'
+                )
 
             if self._enable_color:
                 self._init_color()
@@ -418,7 +466,8 @@ def main(args=None):
 
     _stop = threading.Event()
     node._stop = _stop
-    signal.signal(signal.SIGINT, lambda sig, frame: _stop.set())
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda sig, frame: _stop.set())
 
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
