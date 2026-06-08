@@ -130,6 +130,7 @@ _SDO_READ_4   = 0x43  # response: 4 bytes
 _SDO_READ_2   = 0x4B  # response: 2 bytes
 _SDO_READ_1   = 0x4F  # response: 1 byte
 _SDO_ABORT    = 0x80
+_SDO_WRITE_ACK = 0x60  # server response to expedited download
 
 
 # ── DS402 object indices (16-bit) ──────────────────────────────────────────────
@@ -207,7 +208,7 @@ class EZMotionMotorBase:
         MAX_TORQUE_PERMIL max torque in 0.1% units (default 3000 = 300% rated)
     """
 
-    RATED_TORQUE_NM:   float = 3.5
+    RATED_TORQUE_NM:   float = 1.27
     MAX_SPEED_RPM:     float = 3000.0
     MAX_TORQUE_PERMIL: int   = 3000   # 300% of rated
 
@@ -224,9 +225,11 @@ class EZMotionMotorBase:
         self._comms     = comms
         self._feedback  = MotorFeedback(node_id=node_id)
 
-        self._sdo_result: Optional[bytes] = None
-        self._sdo_event                   = threading.Event()
-        self._feedback_callback           = None
+        self._sdo_result: Optional[bytes]  = None
+        self._sdo_event                    = threading.Event()
+        self._sdo_lock                     = threading.Lock()
+        self._sdo_pending: tuple           = (None, None)  # (index, sub) of in-flight request
+        self._feedback_callback            = None
 
         self._sdo_rx_id  = 0x580 + node_id
         self._sdo_tx_id  = 0x600 + node_id
@@ -259,15 +262,23 @@ class EZMotionMotorBase:
     def _handle_sdo_response(self, d: bytes) -> None:
         if len(d) < 8:
             return
-        cmd = d[0]
+        cmd        = d[0]
+        resp_index = d[1] | (d[2] << 8)
+        resp_sub   = d[3]
+
+        # Drop frames that don't match the in-flight request
+        pending_index, pending_sub = self._sdo_pending
+        if pending_index is not None:
+            if resp_index != pending_index or resp_sub != pending_sub:
+                return
+
         if cmd == _SDO_ABORT:
             self._sdo_result = None
             self._sdo_event.set()
         elif cmd in (_SDO_READ_4, _SDO_READ_2, _SDO_READ_1):
             self._sdo_result = bytes(d[4:8])
             self._sdo_event.set()
-        else:
-            # Write acknowledgement (0x60) — no data to extract
+        elif cmd == _SDO_WRITE_ACK:
             self._sdo_result = bytes(4)
             self._sdo_event.set()
 
@@ -341,12 +352,15 @@ class EZMotionMotorBase:
 
     def _sdo_request(self, data: bytes) -> Optional[bytes]:
         """Send SDO request and block until reply or timeout. Returns reply data bytes."""
-        self._sdo_event.clear()
-        self._sdo_result = None
-        self._comms.send(self._sdo_tx_id, data)
-        if self._sdo_event.wait(timeout=self.rx_timeout):
-            return self._sdo_result
-        return None
+        with self._sdo_lock:
+            self._sdo_pending = (data[1] | (data[2] << 8), data[3])
+            self._sdo_event.clear()
+            self._sdo_result = None
+            self._comms.send(self._sdo_tx_id, data)
+            if self._sdo_event.wait(timeout=self.rx_timeout):
+                return self._sdo_result
+            self._sdo_pending = (None, None)
+            return None
 
     def write_sdo_u16(self, index: int, sub: int, value: int) -> bool:
         req = bytes([_SDO_WRITE_2, index & 0xFF, (index >> 8) & 0xFF, sub]) + \
@@ -443,7 +457,7 @@ class EZMotionMotorBase:
 
     def set_operation_mode(self, mode: OperationMode) -> bool:
         """Set DS402 operation mode (6060h). Motor must be in Operation Enabled."""
-        return self.write_sdo_s16(OD.MODES_OF_OP, 0x00, int(mode))
+        return self.write_sdo_u8(OD.MODES_OF_OP, 0x00, int(mode) & 0xFF)
 
     def read_operation_mode(self) -> Optional[int]:
         """Read active operation mode from 6061h (Modes of Operation Display)."""
@@ -573,16 +587,13 @@ class EZMotionMotorBase:
     # ── CAN configuration (SDO) ───────────────────────────────────────────────
 
     def set_can_node_id(self, new_id: int) -> bool:
-        """Write new CAN Node ID (2101h). Requires save + reset to take effect."""
-        return self.write_sdo_u32(OD.CAN_NODE_ID, 0x00, new_id)
+        """Write new CAN Node ID (2101h, UINT8). Requires save + reset to take effect."""
+        return self.write_sdo_u8(OD.CAN_NODE_ID, 0x00, new_id & 0xFF)
 
-    def set_can_bitrate(self, bitrate_code: int) -> bool:
-        """
-        Write CAN bit rate code (2102h). Requires save + reset to take effect.
-        Supported codes: 0=10k, 1=20k, 2=50k, 3=125k, 4=250k,
-                         5=500k, 6=800k, 7=1000k.
-        """
-        return self.write_sdo_u32(OD.CAN_BIT_RATE, 0x00, bitrate_code)
+    def set_can_bitrate(self, bitrate_kbps: int) -> bool:
+        """Write CAN bit rate (2102h, UINT16) in kbps. Requires save + reset to take effect.
+        Common values: 125, 250, 500, 1000."""
+        return self.write_sdo_u16(OD.CAN_BIT_RATE, 0x00, bitrate_kbps & 0xFFFF)
 
     # ── Feedback callback / property ──────────────────────────────────────────
 

@@ -12,7 +12,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'config_path',
             default_value=PathJoinSubstitution(
-                [FindPackageShare('ezmotion_p'), 'config', 'config.toml']
+                [FindPackageShare('ezmotion_p'), 'config', 'torso.toml']
             ),
             description='Path to ezmotion config toml file',
         ),

@@ -47,13 +47,12 @@ Config
     operation_mode      str    per-motor override (optional)
     joint_limit_min     float  rad (optional)
     joint_limit_max     float  rad (optional)
-    motor_homing_pos    float  rad subtracted from raw position for user-frame (optional)
     profile_velocity    float  rad/s written to 6081h at startup (optional)
     profile_acceleration float  rad/s² written to 6083h (optional)
     profile_deceleration float  rad/s² written to 6084h (optional)
     max_torque          float  N·m written to 6072h (optional)
     homing_method             int    DS402 6098h (default -3 = torque hard-stop upward)
-    homing_max_torque_percent int    max torque % during homing — 2070h sub1 (default 1000)
+    homing_max_torque_permil int    max torque % during homing — 2070h sub1 (default 1000)
     homing_speed_rps          float  homing speed rad/s — 6099h sub1+sub2 (default 1.0)
     homing_acceleration_rps2  float  homing accel rad/s² — 609Ah (default 50.0)
     homing_offset_rotations   float  zero offset from hard stop in rotations — 607Ch (default 1.0)
@@ -319,7 +318,6 @@ class MotorNode(Node):
                 self._motor_cfg[name]     = {
                     'joint_limit_min':    cfg.get('joint_limit_min'),
                     'joint_limit_max':    cfg.get('joint_limit_max'),
-                    'motor_homing_pos':   cfg.get('motor_homing_pos'),
                     'max_vel':            cfg.get('max_vel'),
                     'max_torque':         cfg.get('max_torque'),
                     'profile_velocity':   cfg.get('profile_velocity'),
@@ -335,7 +333,7 @@ class MotorNode(Node):
                     'homing_height_mm': cfg.get('homing_height_mm', cfg.get('top_height_mm', 600.0)),
                     # Homing parameters
                     'homing_method':             cfg.get('homing_method', -3),
-                    'homing_max_torque_percent': cfg.get('homing_max_torque_percent', 1000),
+                    'homing_max_torque_permil': cfg.get('homing_max_torque_permil', 1000),
                     'homing_speed_rps':          cfg.get('homing_speed_rps', 1.0),
                     'homing_acceleration_rps2':  cfg.get('homing_acceleration_rps2', 50.0),
                     'homing_offset_rotations':   cfg.get('homing_offset_rotations', 1.0),
@@ -357,13 +355,21 @@ class MotorNode(Node):
                 if mcfg.get('max_torque') is not None:
                     motor.set_max_torque(float(mcfg['max_torque']))
 
-                # Set operation mode
+                # Set operation mode:
+                # proper fault reset (0→1 rising edge) → shutdown → set mode →
+                # enable → wait for state to settle → confirm → disable
                 target_mode = self._resolve_mode(cfg)
                 mode_label  = 'none'
                 if target_mode is not None:
                     self._motor_cfg[name]['configured_mode'] = target_mode
+                    motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0000)  # ensure bit7 = 0
+                    motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0080)  # rising edge → fault reset
+                    motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0006)  # shutdown → Ready to Switch On
                     motor.set_operation_mode(target_mode)
+                    motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x000F)  # enable → Operation Enabled
+                    time.sleep(0.1)                                    # allow state + mode display to settle
                     confirmed = motor.read_operation_mode()
+                    motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0000)  # disable voltage
                     if confirmed == int(target_mode):
                         self._motor_mode[name] = target_mode
                         mode_label = target_mode.name
@@ -373,6 +379,19 @@ class MotorNode(Node):
                             f'[{name}] mode mismatch — wrote {target_mode.name}, '
                             f'motor reports {actual}'
                         )
+
+                # Configure TPDO event timer (active report)
+                active_hz = float(
+                    cfg.get('active_report_hz',
+                            self._defaults.get('active_report_hz', 0.0))
+                )
+                if active_hz > 0.0:
+                    timer_ms = max(1, int(1000.0 / active_hz))
+                    motor.write_sdo_u16(_TPDO3_COMM, 0x05, timer_ms)
+                    motor.write_sdo_u16(_TPDO4_COMM, 0x05, timer_ms)
+                    self.get_logger().info(
+                        f'  [{name}]  active_report={active_hz:.1f} Hz ({timer_ms} ms)'
+                    )
 
                 self.get_logger().info(
                     f'  [{name}]  type={motor_type}  node_id={cfg["node_id"]}  '
@@ -406,6 +425,7 @@ class MotorNode(Node):
         if fault_now != self._last_fault[name]:
             if fault_now:
                 self.get_logger().error(f'[{name}] Fault — statusword=0x{fb.statusword:04X}')
+                self._motor_enabled[name] = False
             else:
                 self.get_logger().info(f'[{name}] Fault cleared')
             self._fault_pubs[name].publish(self._build_fault_msg(name, fb, now))
@@ -432,22 +452,22 @@ class MotorNode(Node):
     # ── Position / command helpers ─────────────────────────────────────────────
 
     def _user_pos(self, name: str, motor_pos: float) -> float:
-        return motor_pos - (self._motor_cfg[name].get('motor_homing_pos') or 0.0)
+        return motor_pos
 
     def _motor_pos(self, name: str, cmd_pos: float) -> float:
-        return cmd_pos + (self._motor_cfg[name].get('motor_homing_pos') or 0.0)
+        return cmd_pos
 
     def _check_mode(self, name: str, required: OperationMode) -> bool:
         current = self._motor_mode.get(name)
-        if current != required:
-            self.get_logger().error(
-                f'[{name}] Mode mismatch: in {current.name if current else "None"}, '
-                f'expected {required.name}'
-            )
-            return False
-        if not self._motor_enabled.get(name, False):
-            self.get_logger().warning(f'[{name}] Motor not enabled')
-        return True
+        if current == required:
+            if not self._motor_enabled.get(name, False):
+                self.get_logger().warning(f'[{name}] Motor not enabled')
+            return True
+        self.get_logger().error(
+            f'[{name}] Mode mismatch: in {current.name if current else "None"}, '
+            f'expected {required.name}'
+        )
+        return False
 
     def _check_joint_limits(self, name: str, motor_pos: float) -> bool:
         lo = self._motor_cfg[name].get('joint_limit_min')
@@ -506,29 +526,43 @@ class MotorNode(Node):
         motor_pos = self._height_to_motor_rad(name, height_mm)
         with self._motor_locks[name]:
             try:
-                self._motors[name].trigger_move_pp(motor_pos)
+                motor = self._motors[name]
+                profile_vel = self._motor_cfg[name].get('profile_velocity')
+                if profile_vel is not None:
+                    motor.set_profile_velocity(float(profile_vel))
+                motor.trigger_move_pp(motor_pos)
             except Exception as e:
                 self.get_logger().error(f'[{name}] go_to error: {e}')
 
     def _on_safe_vel(self, msg: Float64, name: str) -> None:
-        """PV mode: set velocity in mm/s with soft limit protection."""
-        vel_mm_s       = msg.data
-        top            = self._motor_cfg[name]['top_height_mm']
-        bottom         = self._motor_cfg[name]['bottom_height_mm']
-        current_height = self._motor_rad_to_height(name, self._motors[name].feedback.position)
+        """PP mode: set velocity (rad/s) toward the appropriate height limit as target."""
+        vel_rad_s = msg.data
+        top       = self._motor_cfg[name]['top_height_mm']
+        bottom    = self._motor_cfg[name]['bottom_height_mm']
 
-        if vel_mm_s > 0 and current_height >= top:
-            return   # at max height, going up — silently ignore
-        if vel_mm_s < 0 and current_height <= bottom:
-            return   # at min height, going down — silently ignore
-
-        if not self._check_mode(name, OperationMode.PV):
+        if not self._check_mode(name, OperationMode.PP):
             return
 
-        vel_rad_s = _HEIGHT_DIR * vel_mm_s * _RAD_PER_MM
         with self._motor_locks[name]:
             try:
-                self._motors[name].set_target_velocity_pv(vel_rad_s)
+                motor = self._motors[name]
+                if vel_rad_s == 0.0:
+                    profile_vel = self._motor_cfg[name].get('profile_velocity')
+                    if profile_vel is not None:
+                        motor.set_profile_velocity(float(profile_vel))
+                    motor.trigger_move_pp(motor.feedback.position)
+                    return
+                motor.set_profile_velocity(abs(vel_rad_s))
+                if vel_rad_s > 0:
+                    current_height = self._motor_rad_to_height(name, motor.feedback.position)
+                    if current_height >= top:
+                        return
+                    motor.trigger_move_pp(self._height_to_motor_rad(name, top))
+                else:
+                    current_height = self._motor_rad_to_height(name, motor.feedback.position)
+                    if current_height <= bottom:
+                        return
+                    motor.trigger_move_pp(self._height_to_motor_rad(name, bottom))
             except Exception as e:
                 self.get_logger().error(f'[{name}] safe_vel error: {e}')
 
@@ -718,16 +752,22 @@ class MotorNode(Node):
             res.success = False
             res.message = f'Motor {req.name!r} not found. "all" not supported for read_param.'
             return res
+        size = req.size if req.size in (1, 2, 4) else 4
         try:
             with self._motor_locks[req.name]:
-                raw = motor.read_sdo_u32(req.index, 0x00)
+                if size == 1:
+                    raw = motor.read_sdo_u8(req.index, req.sub_index)
+                elif size == 2:
+                    raw = motor.read_sdo_u16(req.index, req.sub_index)
+                else:
+                    raw = motor.read_sdo_u32(req.index, req.sub_index)
             if raw is None:
                 res.success = False
-                res.message = f'No SDO response for index 0x{req.index:04X}'
+                res.message = f'No SDO response for 0x{req.index:04X}:{req.sub_index:02X}'
             else:
                 res.success = True
                 res.message = 'OK'
-                res.value   = float(raw)
+                res.value   = int(raw)
         except Exception as e:
             res.success = False
             res.message = str(e)
@@ -740,11 +780,17 @@ class MotorNode(Node):
             res.message = f'Motor {req.name!r} not found'
             return res
 
+        size   = req.size if req.size in (1, 2, 4) else 4
         failed = []
         for name, motor in motors.items():
             try:
                 with self._motor_locks[name]:
-                    motor.write_sdo_u32(req.index, 0x00, int(req.value))
+                    if size == 1:
+                        motor.write_sdo_u8(req.index, req.sub_index, int(req.value) & 0xFF)
+                    elif size == 2:
+                        motor.write_sdo_u16(req.index, req.sub_index, int(req.value) & 0xFFFF)
+                    else:
+                        motor.write_sdo_u32(req.index, req.sub_index, int(req.value) & 0xFFFFFFFF)
                     if req.persist:
                         motor.save_params()
             except Exception as e:
@@ -806,13 +852,13 @@ class MotorNode(Node):
          10. Homing offset         (607Ch)     shift zero away from hard stop
          11. Trigger               (6040h = 0x001F)
 
-        Polls statusword bit 10 (target reached) until done or timeout.
+        Polls statusword bit 12 (homing attained) until done or timeout.
         Returns (success, message).
         """
         mcfg = self._motor_cfg[name]
 
         homing_method   = int(mcfg['homing_method'])
-        torque_pct      = int(mcfg['homing_max_torque_percent'])
+        torque_pct      = int(mcfg['homing_max_torque_permil'])
         speed_counts    = abs(int(_rad_s_to_counts_s(float(mcfg['homing_speed_rps']))))
         accel_counts    = abs(int(_rad_s_to_counts_s(float(mcfg['homing_acceleration_rps2']))))
         offset_counts   = int(float(mcfg['homing_offset_rotations']) * COUNTS_PER_REV)
@@ -839,16 +885,16 @@ class MotorNode(Node):
         self._motor_enabled[name] = True
         self.get_logger().info(f'[{name}] Homing started (method={homing_method})')
 
-        # Poll statusword bit 10 (target reached) — updated via TPDO3 or SDO
+        # Poll statusword bit 12 (homing attained) — updated via TPDO
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             sw = motor.feedback.statusword
-            if sw & (1 << 10):                        # target reached
-                return True, 'Homing complete'
             if sw & (1 << 13):                        # homing error (bit 13)
                 return False, f'Homing error (statusword=0x{sw:04X})'
             if sw & (1 << 3):                         # generic fault
                 return False, f'Fault during homing (statusword=0x{sw:04X})'
+            if sw & (1 << 12):                        # homing attained (bit 12)
+                return True, 'Homing complete'
             time.sleep(0.05)
 
         return False, f'Homing timeout after {timeout:.1f}s'
@@ -894,17 +940,28 @@ class MotorNode(Node):
                 try:
                     ok, msg = self._home_motor(name, motor)
                     if ok:
-                        # Restore configured operation mode
+                        # Restore configured operation mode using same reliable sequence as init
                         configured = self._motor_cfg[name].get('configured_mode')
                         if configured is not None:
-                            motor.write_sdo_u16(OD.CTRL_WORD,   0x00, 0x0006)       # Shutdown
+                            motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0000)  # ensure bit7 = 0
+                            motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0080)  # fault reset
+                            motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0006)  # shutdown → Ready to Switch On
                             motor.set_operation_mode(configured)
-                            motor.enable()
-                            self._motor_mode[name]    = configured
-                            self._motor_enabled[name] = True
-                            self.get_logger().info(
-                                f'[{name}] Restored mode {configured.name} after homing'
-                            )
+                            motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x000F)  # enable → Operation Enabled
+                            time.sleep(0.1)
+                            confirmed = motor.read_operation_mode()
+                            if confirmed == int(configured):
+                                self._motor_mode[name]    = configured
+                                self._motor_enabled[name] = True
+                                self.get_logger().info(
+                                    f'[{name}] Restored mode {configured.name} after homing'
+                                )
+                            else:
+                                actual = str(confirmed) if confirmed is not None else 'no response'
+                                self.get_logger().error(
+                                    f'[{name}] Mode restore failed after homing — '
+                                    f'wrote {configured.name}, motor reports {actual}'
+                                )
                 except Exception as e:
                     ok, msg = False, str(e)
 

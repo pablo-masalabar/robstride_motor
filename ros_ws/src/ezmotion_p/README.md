@@ -145,7 +145,6 @@ ros2 topic pub /ezmotion/motors/MotorA/safe_vel std_msgs/msg/Float64 "{data: 50.
 | `operation_mode` | no | Per-motor DS402 mode override |
 | `joint_limit_min` | no | Minimum position (rad) — commands rejected outside range |
 | `joint_limit_max` | no | Maximum position (rad) |
-| `motor_homing_pos` | no | Offset subtracted from raw position for user frame (rad) |
 | `max_vel` | no | Velocity clamp for all rad/s commands (rad/s) |
 | `profile_velocity` | no | Written to 6081h at startup (rad/s) |
 | `profile_acceleration` | no | Written to 6083h at startup (rad/s²) |
@@ -155,7 +154,7 @@ ros2 topic pub /ezmotion/motors/MotorA/safe_vel std_msgs/msg/Float64 "{data: 50.
 | `bottom_height_mm` | no | Minimum height for `go_to`/`safe_vel` (mm, default `50.0`) |
 | `homing_height_mm` | no | Physical height at motor position 0 after homing (mm, default = `top_height_mm`) |
 | `homing_method` | no | DS402 6098h, default `-3` (torque hard-stop upward) |
-| `homing_max_torque_percent` | no | Written to 2070h sub1, default `1000` (100% rated) |
+| `homing_max_torque_permil` | no | Written to 2070h sub1, default `1000` (100% rated) |
 | `homing_speed_rps` | no | Written to 6099h sub1+sub2 (rad/s), default `1.0` |
 | `homing_acceleration_rps2` | no | Written to 609Ah (rad/s²), default `50.0` |
 | `homing_offset_rotations` | no | Zero offset from hard stop in rotations — written to 607Ch, default `1.0` |
@@ -175,7 +174,7 @@ Homing uses DS402 **Homing Mode** (mode 6) to find a physical reference position
 3. 6060h = 6             (Set Homing mode)
 4. Controlword = 0x000F  (Enable in Homing mode)
 5. 6098h = homing_method (-3 = HOME_USING_MAX_TORQUE_UP)
-6. 2070h sub1 = homing_max_torque_percent
+6. 2070h sub1 = homing_max_torque_permil
 7. 6099h sub1 = homing_speed   (search speed)
 8. 6099h sub2 = homing_speed   (zero speed)
 9. 609Ah      = homing_accel

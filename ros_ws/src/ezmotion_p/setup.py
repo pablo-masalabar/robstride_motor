@@ -10,8 +10,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/ezmotion_p']),
         ('share/ezmotion_p',        ['package.xml']),
-        ('share/ezmotion_p/launch', glob.glob('launch/*')),
-        ('share/ezmotion_p/config', glob.glob('config/*')),
+        ('share/ezmotion_p/launch', glob.glob('launch/*.py')),
+        ('share/ezmotion_p/config', glob.glob('config/*.toml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
