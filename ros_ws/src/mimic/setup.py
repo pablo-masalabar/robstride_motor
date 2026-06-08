@@ -10,8 +10,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/mimic']),
         ('share/mimic',        ['package.xml']),
-        ('share/mimic/launch', glob.glob('launch/*')),
-        ('share/mimic/config', glob.glob('config/*')),
+        ('share/mimic/launch', glob.glob('launch/*.py')),
+        ('share/mimic/config', glob.glob('config/*.toml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -22,3 +22,6 @@ def subtract_2pi(position: float) -> float:
 
 def subtract_from_neg_2pi(position: float) -> float:
     return - 2 * 3.14159 - (position)
+
+def add_half_pi(position: float) -> float:
+    return position + 1.57

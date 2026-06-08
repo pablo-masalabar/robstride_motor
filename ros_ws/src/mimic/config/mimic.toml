@@ -3,7 +3,8 @@
 # Switch at runtime: ros2 service call /mimic_node/switch_target \
 #   custom_interfaces/srv/SetMimicTarget "{target: 'left_arm'}"
 
-mode             = "pp"
+robstride_mode   = "pp"
+damiao_mode      = "position_velocity"   # MIT | position_velocity | velocity | force_position_hybrid
 debug            = false
 active_report_hz = 50.0
 # op_hz          = 30.0   # uncomment to publish at fixed rate instead of passthrough
@@ -23,9 +24,9 @@ robstride_motors = ["Sp", "Sr", "Sw", "Ep", "Ww", "Wp", "Wr"]
 damiao_motors    = ["Ag"]
 
 [robstride_pp_defaults]
-speed        = 30.0    # rad/s
-acceleration = 25.0    # rad/s²
-deceleration = 25.0    # rad/s²
+speed        = 5.0    # rad/s
+acceleration = 5.0    # rad/s²
+deceleration = 5.0    # rad/s²
 torque_limit = 0.0   # N·m
 
 [robstride_csp_defaults]
@@ -43,7 +44,7 @@ Sp = "negate"
 Sr = "negate"
 Sw = "negate"
 Ep = "negate"
-Ww = "negate"
+Ww = "add_half_pi"
 Wp = "negate"
 Wr = "passthrough"
 
@@ -53,7 +54,7 @@ Sp = "negate"
 Sr = "negate"
 Sw = "negate"
 Ep = "negate"
-Ww = "negate"
+Ww = "add_half_pi"
 Wp = "negate"
 Wr = "passthrough"
 

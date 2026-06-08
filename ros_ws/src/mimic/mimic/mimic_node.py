@@ -30,6 +30,13 @@ _MODE_RUN_MODE_INT = {
     'pp':  1,  # POSITION_PP
 }
 
+_DAMIAO_MODE_INT = {
+    'mit':                    1,
+    'position_velocity':      2,
+    'velocity':               3,
+    'force_position_hybrid':  4,
+}
+
 
 class MimicNode(Node):
 
@@ -71,7 +78,8 @@ class MimicNode(Node):
         self._debug:            bool  = bool(cfg.get('debug', False))
         self._active_report_hz: float = float(cfg.get('active_report_hz', 30.0))
         self._op_hz:            float = float(cfg.get('op_hz', 0.0))
-        self._mode:             str   = cfg.get('mode', 'csp').lower()
+        self._mode:             str   = cfg.get('robstride_mode', 'pp').lower()
+        self._damiao_mode:      str   = cfg.get('damiao_mode', 'position_velocity').lower()
 
         self._robstride_pp_defaults: Dict[str, float] = {
             'speed':        float(cfg.get('robstride_pp_defaults',  {}).get('speed',        0.0)),
@@ -451,11 +459,11 @@ class MimicNode(Node):
             return
         req      = SetRunMode.Request()
         req.name = 'all'
-        req.mode = 2  # POSITION_VELOCITY — fixed for Damiao
+        req.mode = _DAMIAO_MODE_INT.get(self._damiao_mode, 2)
         req.automatic_enable_disable = False
         res = self._damiao_set_run_mode_client.call(req)
         if res.success:
-            self.get_logger().info(f'[{self._damiao_target_prefix}] Run mode set to POSITION_VELOCITY')
+            self.get_logger().info(f'[{self._damiao_target_prefix}] Run mode set to {self._damiao_mode.upper()}')
         else:
             self.get_logger().error(f'[{self._damiao_target_prefix}] set_run_mode failed: {res.message}')
 
