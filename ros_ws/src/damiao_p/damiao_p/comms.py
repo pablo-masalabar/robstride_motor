@@ -204,8 +204,11 @@ class DamiaoCANComms:
 
     def send(self, arb_id: int, data: bytes) -> None:
         """Transmit a standard (11-bit) CAN frame with the given data bytes."""
-        self._bus.send(can.Message(
-            arbitration_id=arb_id,
-            data=bytes(data),
-            is_extended_id=False,
-        ))
+        try:
+            self._bus.send(can.Message(
+                arbitration_id=arb_id,
+                data=bytes(data),
+                is_extended_id=False,
+            ))
+        except can.CanOperationError as e:
+            raise RuntimeError(f'Failed to transmit: {e}') from e

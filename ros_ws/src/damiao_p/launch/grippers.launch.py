@@ -21,7 +21,7 @@ def generate_launch_description():
     motor_node = Node(
         package='damiao_p',
         executable='motor_node',
-        name='damiao',
+        name='grippers',
         output='screen',
         parameters=[{'config_path': LaunchConfiguration('config')}],
     )

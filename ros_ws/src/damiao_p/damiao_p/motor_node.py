@@ -478,20 +478,20 @@ class MotorNode(Node):
             return False
         return True
 
-    def _check_joint_limits(self, name: str, motor_pos: float) -> bool:
+    def _clamp_position(self, name: str, motor_pos: float) -> float:
         lim = self._motor_cfg[name]
         lo, hi = lim.get('joint_limit_min'), lim.get('joint_limit_max')
         if lo is not None and motor_pos < lo:
-            self.get_logger().error(
-                f'[{name}] Rejected: pos {motor_pos:.4f} < limit_min {lo:.4f}'
+            self.get_logger().warning(
+                f'[{name}] Position {motor_pos:.4f} clamped to limit_min {lo:.4f}'
             )
-            return False
+            return lo
         if hi is not None and motor_pos > hi:
-            self.get_logger().error(
-                f'[{name}] Rejected: pos {motor_pos:.4f} > limit_max {hi:.4f}'
+            self.get_logger().warning(
+                f'[{name}] Position {motor_pos:.4f} clamped to limit_max {hi:.4f}'
             )
-            return False
-        return True
+            return hi
+        return motor_pos
 
     def _clamp_vel(self, name: str, v: float) -> float:
         lim = self._motor_cfg[name].get('max_vel')
@@ -519,9 +519,7 @@ class MotorNode(Node):
     def _on_cmd_mit(self, msg: OperationCommand, name: str) -> None:
         if not self._check_mode(name, RunMode.MIT):
             return
-        motor_pos = self._motor_pos(name, msg.position)
-        if not self._check_joint_limits(name, motor_pos):
-            return
+        motor_pos = self._clamp_position(name, self._motor_pos(name, msg.position))
         cfg = self._motor_cfg[name]
         kp  = float(cfg['kp']) if cfg.get('kp') is not None else 0.0
         kd  = float(cfg['kd']) if cfg.get('kd') is not None else 0.0
@@ -540,10 +538,11 @@ class MotorNode(Node):
     def _on_cmd_position_pv(self, msg: PositionPPCommand, name: str) -> None:
         if not self._check_mode(name, RunMode.POSITION_VELOCITY):
             return
-        motor_pos = self._motor_pos(name, msg.position)
-        if not self._check_joint_limits(name, motor_pos):
-            return
-        speed = self._clamp_vel(name, msg.speed if msg.speed > 0.0 else 2.0)
+        motor_pos = self._clamp_position(name, self._motor_pos(name, msg.position))
+        if msg.speed > 0.0:
+            speed = self._clamp_vel(name, msg.speed)
+        else:
+            speed = float(self._motor_cfg[name].get('max_vel') or self._motors[name].V_MAX)
         with self._motor_locks[name]:
             try:
                 self._motors[name].set_position_velocity(motor_pos, speed)
@@ -565,10 +564,11 @@ class MotorNode(Node):
         # current_limit (per-unit 0-1.0 fraction of Imax).
         if not self._check_mode(name, RunMode.FORCE_POSITION_HYBRID):
             return
-        motor_pos = self._motor_pos(name, msg.position)
-        if not self._check_joint_limits(name, motor_pos):
-            return
-        speed   = self._clamp_vel(name, msg.speed_limit if msg.speed_limit > 0.0 else 2.0)
+        motor_pos = self._clamp_position(name, self._motor_pos(name, msg.position))
+        if msg.speed_limit > 0.0:
+            speed = self._clamp_vel(name, msg.speed_limit)
+        else:
+            speed = float(self._motor_cfg[name].get('max_vel') or self._motors[name].V_MAX)
         i_pu    = min(max(msg.current_limit, 0.0), 1.0) if msg.current_limit > 0.0 else 1.0
         with self._motor_locks[name]:
             try:
@@ -898,10 +898,13 @@ class MotorNode(Node):
                         # changes, but the motor always replies with a fresh
                         # feedback frame which _on_feedback publishes.
                         with self._motor_locks[motor_name]:
-                            if self._motor_enabled.get(motor_name, False):
-                                motor.enable()
-                            else:
-                                motor.disable()
+                            try:
+                                if self._motor_enabled.get(motor_name, False):
+                                    motor.enable()
+                                else:
+                                    motor.disable()
+                            except Exception as e:
+                                self.get_logger().warning(f'[{motor_name}] active report ping failed: {e}')
                     return cb
 
                 self._report_timers[name] = self.create_timer(

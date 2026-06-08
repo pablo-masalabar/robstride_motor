@@ -10,8 +10,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/damiao_p']),
         ('share/damiao_p',              ['package.xml']),
-        ('share/damiao_p/launch',       glob.glob('launch/*')),
-        ('share/damiao_p/config',       glob.glob('config/*')),
+        ('share/damiao_p/launch',       glob.glob('launch/*.py')),
+        ('share/damiao_p/config',       glob.glob('config/*.toml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
