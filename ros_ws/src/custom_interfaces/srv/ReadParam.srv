@@ -1,9 +1,11 @@
-# Read a single parameter by its function-code index (comm type 17).
-# See ParamIndex enum in motor_base.py for index values.
+# Read a single SDO object by index and sub-index.
+# size: number of bytes to read — 1 (u8), 2 (u16), 4 (u32/s32). Default 4.
 
-string name     # motor name
-uint16 index    # parameter function code (e.g. 0x7019 = MECH_POS)
+string name       # motor name
+uint16 index      # OD object index (e.g. 0x6072)
+uint8  sub_index  # OD sub-index (e.g. 0x01 for 2070h:01h)
+uint8  size       # 1, 2, or 4 bytes (0 = default 4)
 ---
 bool    success
 string  message
-float64 value   # decoded parameter value (float or uint cast to float)
+int64   value     # raw value (caller interprets sign/scale)
