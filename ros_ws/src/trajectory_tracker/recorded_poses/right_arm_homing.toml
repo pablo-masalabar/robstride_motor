@@ -1,16 +1,20 @@
-# right arm homing configuration
+# homing configuration
 
 [homing_pos]
-SpR = 0.084586
-SrR = -0.025894
-SwR = 6.387712
-EpR = -0.054281
-WwR = 6.188618
-WpR = 0.104534
-WrR = -2.228976
+SpR = 0.082324
+SrR = 0.020619
+SwR = -0.034784
+EpR = -0.039484
+WwR = 1.663250
+WpR = -0.034574
+WrR = 0.048127
+AgR = 0.026131
 
-[pp_defaults]
-speed        = 2.50   # rad/s
-acceleration = 1.0    # rad/s²
-deceleration = 1.0    # rad/s²
-torque_limit = 15.0   # N·m
+[robstride_pp_defaults]
+speed        = 15.0
+acceleration = 10.0
+deceleration = 10.0
+torque_limit = 25.0
+
+[damiao_pv_defaults]
+speed = 5.0

@@ -23,12 +23,20 @@ from std_srvs.srv import Trigger
 from trajectory_tracker import transforms as _transforms
 from custom_interfaces.srv import CaptureHomingPose, EnableMotor, RecordArmPose, SetActiveReport, SetArmPose, SetRunMode, StopTrajectoryRecording, TrimTrajectory
 
-_VALID_MODES = frozenset({'pp', 'csp'})
-_VALID_ARMS  = frozenset({'left_arm', 'right_arm'})
+_VALID_MODES        = frozenset({'pp', 'csp'})
+_VALID_DAMIAO_MODES = frozenset({'position_velocity', 'mit', 'velocity', 'force_position_hybrid'})
+_VALID_ARMS         = frozenset({'left_arm', 'right_arm'})
 
 _MODE_INT = {
     'pp':  1,   # POSITION_PP
     'csp': 5,   # POSITION_CSP
+}
+
+_DAMIAO_MODE_INT = {
+    'mit':                    1,
+    'position_velocity':      2,
+    'velocity':               3,
+    'force_position_hybrid':  4,
 }
 
 
@@ -61,6 +69,7 @@ class TrajectoryTrackerNode(Node):
         self._right_gripper_motors: List[str] = list(cfg.get('right_gripper_motors', []))
         self._left_gripper_prefix:  str       = cfg.get('left_gripper_node_prefix', '')
         self._right_gripper_prefix: str       = cfg.get('right_gripper_node_prefix', '')
+        self._gripper_prefix:       str       = cfg.get('gripper_node_prefix', '')
 
         _node_name: str = cfg.get('node_name', 'trajectory_tracker')
         self._ns: str   = f'{_node_name}/'
@@ -104,12 +113,18 @@ class TrajectoryTrackerNode(Node):
         self._damiao_inverse_transforms:  Dict[str, callable] = self._load_transforms(cfg, 'damiao_inverse_transform_map')
         self._damiao_motor_map:           Dict[str, str]      = dict(cfg.get('damiao_motor_map', {}))
 
-        mode = cfg.get('replay_motor_mode', 'pp')
+        mode = cfg.get('replay_robstride_motor_mode', 'pp')
         if mode not in _VALID_MODES:
-            raise RuntimeError(f'Invalid replay_motor_mode "{mode}". Valid: {_VALID_MODES}')
+            raise RuntimeError(f'Invalid replay_robstride_motor_mode "{mode}". Valid: {_VALID_MODES}')
         self._target_mode: str = mode
 
-        pp = cfg.get('pp_defaults', {})
+        damiao_mode = cfg.get('replay_damiao_motor_mode', 'position_velocity')
+        if damiao_mode not in _VALID_DAMIAO_MODES:
+            raise RuntimeError(f'Invalid replay_damiao_motor_mode "{damiao_mode}". Valid: {_VALID_DAMIAO_MODES}')
+        self._damiao_target_mode: str = damiao_mode
+
+
+        pp = cfg.get('robstride_pp_defaults', {})
         self._pp_defaults: Dict[str, float] = {
             'speed':        float(pp.get('speed',        5.0)),
             'acceleration': float(pp.get('acceleration', 10.0)),
@@ -647,11 +662,11 @@ class TrajectoryTrackerNode(Node):
         )
 
         # Set run mode and enable motors grouped by prefix.
-        # Each entry: (motor_name, mode_int) so Damiao motors use mode=2.
         prefix_motors: Dict[str, List[tuple]] = {}
+        damiao_mode_int = _DAMIAO_MODE_INT[self._damiao_target_mode]
         for _, _, replay_motor, _, is_dam in replay_entries:
             prefix  = self._prefix_for_motor(replay_motor)
-            mode_i  = 2 if is_dam else _MODE_INT[mode]
+            mode_i  = damiao_mode_int if is_dam else _MODE_INT[mode]
             prefix_motors.setdefault(prefix, []).append((replay_motor, mode_i))
 
         enable_clients: Dict[str, object] = {}
@@ -859,15 +874,25 @@ class TrajectoryTrackerNode(Node):
         arm  = request.arm.strip().lower()
         name = request.name.strip()
 
-        if arm not in _VALID_ARMS:
+        if arm not in _VALID_ARMS and arm != 'both':
             response.success   = False
-            response.message   = f'arm must be "left_arm" or "right_arm", got "{arm}"'
+            response.message   = f'arm must be "left_arm", "right_arm", or "both", got "{arm}"'
             response.file_path = ''
             return response
 
-        motor_names   = self._motors_for_arm(arm)
-        prefix        = self._prefix_for_arm(arm)
-        state_pattern = f'{prefix}/motors/{{name}}/state'
+        arms_to_record = ['left_arm', 'right_arm'] if arm == 'both' else [arm]
+
+        # Build ordered (motor, topic) list: arm motors first, then grippers, for each arm
+        motor_topics: List[tuple] = []
+        for a in arms_to_record:
+            arm_prefix     = self._prefix_for_arm(a)
+            gripper_prefix = self._gripper_prefix_for_arm(a)
+            motor_topics += [
+                (m, f'{arm_prefix}/motors/{m}/state') for m in self._motors_for_arm(a)
+            ] + [
+                (m, f'{gripper_prefix}/motors/{m}/state') for m in self._gripper_motors_for_arm(a)
+            ]
+        all_motors = [m for m, _ in motor_topics]
 
         if not name:
             name = datetime.now().strftime('%H_%M_%S_%d_%m_%y')
@@ -881,10 +906,9 @@ class TrajectoryTrackerNode(Node):
         events:   Dict[str, threading.Event] = {}
         subs = []
 
-        for motor in motor_names:
+        for motor, topic in motor_topics:
             ev = threading.Event()
             events[motor] = ev
-            topic = state_pattern.format(name=motor)
             sub = self.create_subscription(
                 MotorState,
                 topic,
@@ -912,7 +936,7 @@ class TrajectoryTrackerNode(Node):
         with open(file_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['motor_name'] + _FIELDS)
-            for motor in motor_names:
+            for motor in all_motors:
                 state = captured.get(motor)
                 if state:
                     writer.writerow([
@@ -927,7 +951,7 @@ class TrajectoryTrackerNode(Node):
                     ])
 
         response.success   = True
-        response.message   = f'Recorded {len(captured)}/{len(motor_names)} motors to {file_path}'
+        response.message   = f'Recorded {len(captured)}/{len(all_motors)} motors to {file_path}'
         response.file_path = str(file_path)
         self.get_logger().info(response.message)
         return response
@@ -936,12 +960,12 @@ class TrajectoryTrackerNode(Node):
 
     def _set_arm_pose(self, request, response):
         name = request.name.strip()
-        mode = request.target_mode.strip()
-        arm  = request.arm.strip().lower() if request.arm.strip() else self._replay_arm
+        mode = request.target_mode.strip() or self._target_mode
+        arm  = request.arm.strip().lower() if request.arm.strip() else 'both'
 
-        if arm not in _VALID_ARMS:
+        if arm not in _VALID_ARMS and arm != 'both':
             response.success, response.message, response.motors_set = \
-                False, f'arm must be "left_arm" or "right_arm", got "{arm}"', []
+                False, f'arm must be "left_arm", "right_arm", or "both", got "{arm}"', []
             return response
 
         if not name:
@@ -974,10 +998,19 @@ class TrajectoryTrackerNode(Node):
                 False, 'No valid motor positions found in CSV', []
             return response
 
-        reverse_motor_map: Dict[str, str] = {v: k for k, v in self._motor_map.items()}
+        # Classify which sides are present in the CSV
+        left_set       = set(self._left_arm_motors)
+        right_set      = set(self._right_arm_motors)
+        left_grip_set  = set(self._left_gripper_motors)
+        right_grip_set = set(self._right_gripper_motors)
 
-        is_recording_arm = (arm == self._recording_arm)
-        is_replay_arm    = (arm == self._replay_arm)
+        csv_has_left       = any(m in left_set       for m in motor_positions)
+        csv_has_right      = any(m in right_set      for m in motor_positions)
+        csv_has_left_grip  = any(m in left_grip_set  for m in motor_positions)
+        csv_has_right_grip = any(m in right_grip_set for m in motor_positions)
+
+        rev_motor_map  = {v: k for k, v in self._motor_map.items()}
+        rev_damiao_map = {v: k for k, v in self._damiao_motor_map.items()}
 
         pp_speed    = request.pp_speed        or self._pp_defaults['speed']
         pp_accel    = request.pp_acceleration or self._pp_defaults['acceleration']
@@ -985,61 +1018,106 @@ class TrajectoryTrackerNode(Node):
         pp_torque   = request.pp_torque_limit or self._pp_defaults['torque_limit']
         csp_speed   = request.csp_speed_limit   or self._csp_defaults['speed_limit']
         csp_current = request.csp_current_limit or self._csp_defaults['current_limit']
+        pv_speed    = self._pv_defaults['speed']
 
         mode_int = _MODE_INT[mode]
         qos      = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
+        # cmd_entries: (csv_motor, cmd_motor, prefix, position, is_damiao)
         cmd_entries: List[tuple] = []
+
+        def _add_robstride(csv_motor: str, position: float, csv_side: str) -> None:
+            if arm == 'both':
+                prefix = self._left_arm_prefix if csv_side == 'left' else self._right_arm_prefix
+                cmd_entries.append((csv_motor, csv_motor, prefix, position, False))
+            elif arm == 'left_arm':
+                if csv_side == 'left':
+                    cmd_entries.append((csv_motor, csv_motor, self._left_arm_prefix, position, False))
+                elif not csv_has_left:
+                    rec = rev_motor_map.get(csv_motor)
+                    if rec:
+                        t = self._get_transform(rec, self._inverse_transforms)
+                        cmd_entries.append((csv_motor, rec, self._left_arm_prefix, t(position), False))
+                # else CSV has both sides — skip the other side
+            else:  # right_arm
+                if csv_side == 'right':
+                    cmd_entries.append((csv_motor, csv_motor, self._right_arm_prefix, position, False))
+                elif not csv_has_right:
+                    cmd = self._motor_map.get(csv_motor)
+                    if cmd:
+                        t = self._get_transform(csv_motor, self._transforms)
+                        cmd_entries.append((csv_motor, cmd, self._right_arm_prefix, t(position), False))
+
+        def _add_gripper(csv_motor: str, position: float, csv_side: str) -> None:
+            if arm == 'both':
+                prefix = self._left_gripper_prefix if csv_side == 'left' else self._right_gripper_prefix
+                cmd_entries.append((csv_motor, csv_motor, prefix, position, True))
+            elif arm == 'left_arm':
+                if csv_side == 'left':
+                    cmd_entries.append((csv_motor, csv_motor, self._left_gripper_prefix, position, True))
+                elif not csv_has_left_grip:
+                    rec = rev_damiao_map.get(csv_motor)
+                    if rec:
+                        t = self._get_transform(rec, self._damiao_inverse_transforms)
+                        cmd_entries.append((csv_motor, rec, self._left_gripper_prefix, t(position), True))
+            else:  # right_arm
+                if csv_side == 'right':
+                    cmd_entries.append((csv_motor, csv_motor, self._right_gripper_prefix, position, True))
+                elif not csv_has_right_grip:
+                    cmd = self._damiao_motor_map.get(csv_motor)
+                    if cmd:
+                        t = self._get_transform(csv_motor, self._damiao_transforms)
+                        cmd_entries.append((csv_motor, cmd, self._right_gripper_prefix, t(position), True))
+
         for csv_motor, position in motor_positions.items():
-            if csv_motor in self._motor_map:
-                # CSV has a recording-arm motor
-                if is_replay_arm:
-                    cmd_motor = self._motor_map[csv_motor]
-                    prefix    = self._replay_prefix
-                    transform = self._get_transform(csv_motor, self._transforms)
-                else:
-                    cmd_motor = csv_motor
-                    prefix    = self._recording_prefix
-                    transform = _transforms.passthrough
-            elif csv_motor in reverse_motor_map:
-                # CSV has a replay-arm motor
-                rec_motor = reverse_motor_map[csv_motor]
-                if is_recording_arm:
-                    cmd_motor = rec_motor
-                    prefix    = self._recording_prefix
-                    transform = self._get_transform(rec_motor, self._inverse_transforms)
-                else:
-                    cmd_motor = csv_motor
-                    prefix    = self._replay_prefix
-                    transform = _transforms.passthrough
+            if csv_motor in left_set:
+                _add_robstride(csv_motor, position, 'left')
+            elif csv_motor in right_set:
+                _add_robstride(csv_motor, position, 'right')
+            elif csv_motor in left_grip_set:
+                _add_gripper(csv_motor, position, 'left')
+            elif csv_motor in right_grip_set:
+                _add_gripper(csv_motor, position, 'right')
             else:
-                self.get_logger().warning(f'[{csv_motor}] not in motor_map — skipping')
-                continue
-            cmd_entries.append((csv_motor, cmd_motor, prefix, transform(position)))
+                self.get_logger().warning(f'[{csv_motor}] not in any known motor list — skipping')
+
+        if not cmd_entries:
+            response.success, response.message, response.motors_set = \
+                False, 'No motors to command after filtering', []
+            return response
 
         # Set run mode grouped by prefix
-        prefix_motors: Dict[str, List[str]] = {}
-        for _, cmd_motor, prefix, _ in cmd_entries:
-            prefix_motors.setdefault(prefix, []).append(cmd_motor)
+        damiao_mode_int = _DAMIAO_MODE_INT[self._damiao_target_mode]
+        prefix_motor_modes: Dict[str, List[tuple]] = {}
+        for _, cmd_motor, prefix, _, is_dam in cmd_entries:
+            mode_i = damiao_mode_int if is_dam else mode_int
+            prefix_motor_modes.setdefault(prefix, []).append((cmd_motor, mode_i))
 
-        for prefix, motors in prefix_motors.items():
+        for prefix, motor_modes in prefix_motor_modes.items():
             run_mode_client = self._get_run_mode_client(prefix)
             if not run_mode_client.wait_for_service(timeout_sec=3.0):
                 self.get_logger().error(f'{prefix}/set_run_mode not available')
                 continue
-            for motor in motors:
+            for motor, mode_i in motor_modes:
                 req                          = SetRunMode.Request()
                 req.name                     = motor
-                req.mode                     = mode_int
+                req.mode                     = mode_i
                 req.automatic_enable_disable = True
                 res = run_mode_client.call(req)
                 if not res.success:
                     self.get_logger().error(f'[{motor}] set_run_mode failed: {res.message}')
 
         motors_set: List[str] = []
-        for csv_motor, cmd_motor, prefix, cmd_position in cmd_entries:
-            if mode == 'pp':
-                pub = self.create_publisher(
+        for csv_motor, cmd_motor, prefix, cmd_position, is_dam in cmd_entries:
+            if is_dam:
+                pub          = self.create_publisher(
+                    PositionPPCommand, f'{prefix}/motors/{cmd_motor}/cmd_position_pv', qos)
+                cmd          = PositionPPCommand()
+                cmd.name     = cmd_motor
+                cmd.position = cmd_position
+                cmd.speed    = pv_speed
+            elif mode == 'pp':
+                pub              = self.create_publisher(
                     PositionPPCommand, f'{prefix}/motors/{cmd_motor}/cmd_position_pp', qos)
                 cmd              = PositionPPCommand()
                 cmd.name         = cmd_motor
@@ -1049,7 +1127,7 @@ class TrajectoryTrackerNode(Node):
                 cmd.deceleration = pp_decel
                 cmd.torque_limit = pp_torque
             else:
-                pub = self.create_publisher(
+                pub               = self.create_publisher(
                     PositionCSPCommand, f'{prefix}/motors/{cmd_motor}/cmd_position_csp', qos)
                 cmd               = PositionCSPCommand()
                 cmd.name          = cmd_motor
@@ -1073,39 +1151,43 @@ class TrajectoryTrackerNode(Node):
 
     def _capture_homing_pose(self, request, response):
         arm = request.arm.strip().lower() if hasattr(request.arm, 'strip') else request.arm
-        if arm not in _VALID_ARMS:
+        if arm not in _VALID_ARMS and arm != 'both':
             response.success   = False
-            response.message   = f'arm must be "left_arm" or "right_arm", got "{arm}"'
+            response.message   = f'arm must be "left_arm", "right_arm", or "both", got "{arm}"'
             response.motors    = []
             response.positions = []
             return response
 
-        prefix      = self._prefix_for_arm(arm)
-        motor_names = self._motors_for_arm(arm)
+        arms_to_capture = ['left_arm', 'right_arm'] if arm == 'both' else [arm]
+
+        all_motors: List[str] = []
+        motor_topics: List[tuple] = []
+        for a in arms_to_capture:
+            arm_prefix     = self._prefix_for_arm(a)
+            gripper_prefix = self._gripper_prefix_for_arm(a)
+            for m in self._motors_for_arm(a):
+                all_motors.append(m)
+                motor_topics.append((m, f'{arm_prefix}/motors/{m}/state'))
+            for m in self._gripper_motors_for_arm(a):
+                all_motors.append(m)
+                motor_topics.append((m, f'{gripper_prefix}/motors/{m}/state'))
 
         config_path = self._resolve_homing(request.config_file)
         self.get_logger().info(f'CaptureHomingPose — arm: {arm}, config: {config_path}')
 
         if not Path(config_path).exists():
             template = self._find_homing_template()
-            if template is None:
-                response.success   = False
-                response.message   = f'Config not found and no homing template available: {config_path}'
-                response.motors    = []
-                response.positions = []
-                return response
-            self._create_homing_config(template, config_path, motor_names)
-            self.get_logger().info(f'Created homing config from template: {config_path}')
+            self._create_homing_config(template, config_path, all_motors)
+            self.get_logger().info(f'Created homing config {"from template" if template else "from defaults"}: {config_path}')
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         captured: Dict[str, float] = {}
         events:   Dict[str, threading.Event] = {}
         subs = []
 
-        for name in motor_names:
+        for name, topic in motor_topics:
             ev = threading.Event()
             events[name] = ev
-            topic = f'{prefix}/motors/{name}/state'
             sub = self.create_subscription(
                 MotorState,
                 topic,
@@ -1133,7 +1215,7 @@ class TrajectoryTrackerNode(Node):
         self._update_homing_pos_in_file(config_path, captured)
 
         response.success   = True
-        response.message   = f'Captured {len(captured)}/{len(motor_names)} motors'
+        response.message   = f'Captured {len(captured)}/{len(all_motors)} motors'
         response.motors    = list(captured.keys())
         response.positions = list(captured.values())
         self.get_logger().info(response.message)
@@ -1144,14 +1226,16 @@ class TrajectoryTrackerNode(Node):
         matches = _glob.glob(os.path.join(self._poses_path, '*_homing.toml'))
         return matches[0] if matches else None
 
-    def _create_homing_config(self, template_path: str, dest_path: str,
+    def _create_homing_config(self, template_path: Optional[str], dest_path: str,
                                motor_names: List[str]) -> None:
-        with open(template_path, 'rb') as f:
-            tmpl = tomllib.load(f)
-
-        pp = tmpl.get('pp_defaults', {
-            'speed': 5.0, 'acceleration': 10.0, 'deceleration': 10.0, 'torque_limit': 0.0
-        })
+        if template_path is not None:
+            with open(template_path, 'rb') as f:
+                tmpl = tomllib.load(f)
+            pp  = tmpl.get('robstride_pp_defaults', {})
+            dpv = tmpl.get('damiao_pv_defaults', {})
+        else:
+            pp  = self._pp_defaults
+            dpv = self._pv_defaults
 
         lines = [
             '# homing configuration\n',
@@ -1162,11 +1246,14 @@ class TrajectoryTrackerNode(Node):
             lines.append(f'{name} = 0.0\n')
         lines += [
             '\n',
-            '[pp_defaults]\n',
+            '[robstride_pp_defaults]\n',
             f'speed        = {pp.get("speed",        5.0)}\n',
             f'acceleration = {pp.get("acceleration", 10.0)}\n',
             f'deceleration = {pp.get("deceleration", 10.0)}\n',
             f'torque_limit = {pp.get("torque_limit",  0.0)}\n',
+            '\n',
+            '[damiao_pv_defaults]\n',
+            f'speed = {dpv.get("speed", 5.0)}\n',
         ]
         Path(self._poses_path).mkdir(parents=True, exist_ok=True)
         Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1392,15 +1479,16 @@ class TrajectoryTrackerNode(Node):
             return result
 
         homing_pos: Dict[str, float] = dict(cfg.get('homing_pos', {}))
-        pp         = cfg.get('pp_defaults', {})
+        pp         = cfg.get('robstride_pp_defaults', {})
         motor_names = list(homing_pos.keys())
 
-        prefix = self._prefix_for_motors(motor_names)
+        arm_motors     = [m for m in motor_names if not self._is_damiao_motor(m)]
+        prefix = self._prefix_for_motors(arm_motors)
         if prefix is None:
             goal_handle.abort()
             result = Homing.Result()
             result.success = False
-            result.message = f'Motors {motor_names} do not match left_arm or right_arm motor lists'
+            result.message = f'Arm motors {arm_motors} do not match left_arm or right_arm motor lists'
             result.homed_motors = []
             return result
         total = len(motor_names)
