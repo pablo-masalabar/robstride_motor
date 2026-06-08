@@ -3,7 +3,7 @@
 node_name = "zed"
 
 # ── Device ────────────────────────────────────────────────────────────────────
-serial = ""    # device serial number; empty = first available device
+serial = "33647906"    # device serial number; empty = first available device
 
 # ── Streams ───────────────────────────────────────────────────────────────────
 enable_color = true
@@ -31,6 +31,4 @@ enable_color_rectification  = false
 color_rectification_alpha   = 0.0    # 0.0 = no black borders, 1.0 = full FOV
 color_rectification_crop    = false  # crop rectified image to valid ROI
 
-# ── Zenoh ─────────────────────────────────────────────────────────────────────
-# Zenoh topic prefix is derived from node_name — topics publish under /{node_name}/
-# zenoh_config = "zenoh_config.json5"   # optional path to zenoh JSON5 config file
+# Topics publish under /{node_name}/ e.g. /zed/color/image_raw
