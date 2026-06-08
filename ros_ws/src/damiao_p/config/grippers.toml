@@ -33,12 +33,12 @@ channel           = "can6"
 # master_id         = 0
 
 # optional – software joint limits (rad); commands outside range are rejected
-joint_limit_min     = -4.9
-joint_limit_max     =  0.0
+joint_limit_min     = 0.02
+joint_limit_max     =  5.05
 # optional – subtracted from raw motor position to give user-frame position (rad)
 #motor_homing_pos    =  0.0
 # optional – velocity command clamp (rad/s); no clamp if absent
-#max_vel             =  10.0
+max_vel             =  10.0
 # optional – acceleration clamp applied to action server goals (rad/s²); no clamp if absent
 #max_accel           =  5.0
 # optional – deceleration clamp (rad/s²); stored but not yet applied in commands
@@ -63,5 +63,6 @@ joint_limit_max     =  0.0
 type = "J4310_2EC"
 motor_id = 7
 channel = "can4"
-joint_limit_min     = -4.9
-joint_limit_max     =  0.0
+joint_limit_min     = 0.02
+joint_limit_max     = 5.05
+max_vel             = 10.0
