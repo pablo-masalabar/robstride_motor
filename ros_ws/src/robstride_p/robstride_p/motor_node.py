@@ -839,7 +839,7 @@ class MotorNode(Node):
         return res
 
     def _srv_read_param(self, req: ReadParam.Request, res: ReadParam.Response):
-        # 'all' is not supported — a single float64 value cannot represent all motors.
+        # 'all' is not supported — a single value cannot represent all motors.
         motor = self._motors.get(req.name)
         if motor is None:
             res.success = False
@@ -849,6 +849,7 @@ class MotorNode(Node):
             )
             return res
         try:
+            import struct as _struct
             with self._motor_locks[req.name]:
                 if req.index in _UINT_PARAMS:
                     val = motor.read_param_uint(req.index)
@@ -859,8 +860,13 @@ class MotorNode(Node):
                 res.message = 'No response from motor'
             else:
                 res.success = True
-                res.message = 'OK'
-                res.value   = float(val)
+                if isinstance(val, float):
+                    # Pack float as raw IEEE 754 bits into int64 — use read_param helper to unpack
+                    res.value   = _struct.unpack('<i', _struct.pack('<f', val))[0]
+                    res.message = f'OK (float: {val})'
+                else:
+                    res.value   = int(val)
+                    res.message = 'OK'
         except Exception as e:
             res.success = False
             res.message = str(e)
