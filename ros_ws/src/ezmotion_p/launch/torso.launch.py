@@ -20,7 +20,7 @@ def generate_launch_description():
         Node(
             package='ezmotion_p',
             executable='ezmotion_node',
-            name='ezmotion_node',
+            name='torso',
             output='screen',
             parameters=[{
                 'config_path': config_path,

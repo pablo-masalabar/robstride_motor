@@ -1,8 +1,8 @@
 # ezmotion_p — motor node config
 
 [defaults]
-node_name                = "ezmotion"
-channel                  = "can5"
+node_name                = "torso"
+channel                  = "can1"
 bustype                  = "socketcan"
 bitrate                  = 1000000
 rx_timeout               = 0.1        # SDO reply timeout (s)
