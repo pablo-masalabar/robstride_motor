@@ -367,7 +367,14 @@ class MotorNode(Node):
                     motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0006)  # shutdown → Ready to Switch On
                     motor.set_operation_mode(target_mode)
                     motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x000F)  # enable → Operation Enabled
-                    time.sleep(0.1)                                    # allow state + mode display to settle
+                    # Poll statusword via SDO until Operation Enabled (0x6F mask == 0x27).
+                    # TPDOs not yet configured here so _feedback.drive_state is stale.
+                    _t0 = time.monotonic()
+                    while time.monotonic() - _t0 < 2.0:
+                        _sw = motor.read_sdo_u16(OD.STATUS_WORD, 0x00)
+                        if _sw is not None and (_sw & 0x6F) == 0x27:
+                            break
+                        time.sleep(0.02)
                     confirmed = motor.read_operation_mode()
                     motor.write_sdo_u16(OD.CTRL_WORD, 0x00, 0x0000)  # disable voltage
                     if confirmed == int(target_mode):
@@ -434,6 +441,10 @@ class MotorNode(Node):
         # Keep enabled tracking in sync with what the motor reports
         if fb.enabled != self._motor_enabled.get(name, False):
             self._motor_enabled[name] = fb.enabled
+            self.get_logger().warning(
+                f'[{name}] enabled → {fb.enabled} '
+                f'(sw=0x{fb.statusword:04X} state={fb.drive_state.name})'
+            )
 
     def _update_cb(self) -> None:
         if not self._motors:
@@ -461,7 +472,8 @@ class MotorNode(Node):
         current = self._motor_mode.get(name)
         if current == required:
             if not self._motor_enabled.get(name, False):
-                self.get_logger().warning(f'[{name}] Motor not enabled')
+                self.get_logger().warning(f'[{name}] Motor not enabled — command dropped')
+                return False
             return True
         self.get_logger().error(
             f'[{name}] Mode mismatch: in {current.name if current else "None"}, '
@@ -527,9 +539,6 @@ class MotorNode(Node):
         with self._motor_locks[name]:
             try:
                 motor = self._motors[name]
-                profile_vel = self._motor_cfg[name].get('profile_velocity')
-                if profile_vel is not None:
-                    motor.set_profile_velocity(float(profile_vel))
                 motor.trigger_move_pp(motor_pos)
             except Exception as e:
                 self.get_logger().error(f'[{name}] go_to error: {e}')
@@ -657,6 +666,10 @@ class MotorNode(Node):
                 res.position = fb.position
                 res.velocity = fb.velocity
                 res.torque   = fb.torque
+        action = 'enable' if req.enable else 'disable'
+        self.get_logger().info(
+            f'enable_motor [{req.name}] {action} → success={res.success} {res.message}'
+        )
         return res
 
     def _srv_set_run_mode(self, req: SetRunMode.Request, res: SetRunMode.Response):
@@ -684,10 +697,18 @@ class MotorNode(Node):
                         self._motor_enabled[name] = False
                     motor.set_operation_mode(mode)
                     confirmed = motor.read_operation_mode()
-                    if confirmed != int(mode):
-                        actual = str(confirmed) if confirmed is not None else 'no response'
+                    # 6061h only reflects the active mode when in Operation Enabled state.
+                    # If the motor is currently disabled, confirmed may be 0/None even though
+                    # 6060h was written correctly. Update _motor_mode regardless and warn.
+                    if confirmed is not None and confirmed != int(mode):
+                        actual = str(confirmed)
                         failed.append(f'{name}: mode mismatch — wrote {mode.name}, got {actual}')
                         continue
+                    if confirmed is None:
+                        self.get_logger().warning(
+                            f'[{name}] set_run_mode: 6061h no response — '
+                            f'trusting 6060h write, tracking mode as {mode.name}'
+                        )
                     self._motor_mode[name] = mode
                     if req.automatic_enable_disable:
                         motor.enable()
@@ -732,6 +753,12 @@ class MotorNode(Node):
                     motor.write_sdo_u16(_TPDO4_COMM, 0x05, timer_ms)
                     if req.enable:
                         motor.nmt_start()
+                        # Some EZmotion firmware runs an async DS402 state-machine reset
+                        # after NMT Start even when the node was already Operational.
+                        # Without this delay the caller may enable the motor before that
+                        # internal reset completes, causing the motor to bounce back to
+                        # Switch-On-Disabled immediately after enable() returns.
+                        time.sleep(0.15)
                     else:
                         motor.nmt_pre_operational()
             except Exception as e:

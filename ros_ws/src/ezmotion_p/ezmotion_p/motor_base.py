@@ -42,6 +42,7 @@ Torque    : N·m     (converted from DS402 0.1% rated torque units internally)
 import math
 import struct
 import threading
+import time
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import TYPE_CHECKING, Optional
@@ -429,11 +430,12 @@ class EZMotionMotorBase:
         """Transition to Switched On (power stage on, drive not running)."""
         self._write_controlword(_CTRL_SWITCH_ON)
 
-    def enable(self) -> MotorFeedback:
+    def enable(self, timeout: float = 1.0, poll_interval: float = 0.01) -> MotorFeedback:
         """Transition through the full DS402 sequence to Operation Enabled.
 
         Sequence: Shutdown → Ready to Switch On → Operation Enabled.
         If in fault state, performs fault reset first.
+        Polls until the motor statusword confirms Operation Enabled or timeout elapses.
         """
         state = self._feedback.drive_state
         if state == DriveState.FAULT:
@@ -441,6 +443,11 @@ class EZMotionMotorBase:
         if state != DriveState.OPERATION_ENABLED:
             self._write_controlword(_CTRL_SHUTDOWN)   # → Ready to Switch On
             self._write_controlword(_CTRL_ENABLE_OP)  # → Operation Enabled
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._feedback.drive_state == DriveState.OPERATION_ENABLED:
+                break
+            time.sleep(poll_interval)
         return self._feedback
 
     def disable(self) -> MotorFeedback:
