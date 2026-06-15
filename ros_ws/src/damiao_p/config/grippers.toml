@@ -8,7 +8,7 @@ node_name                   = "grippers"
 # required – host CAN ID; must match MST_ID register on all motors
 master_id                   = 23      # 0x17 — read from motor's MST_ID register
 # required – CAN interface name
-channel                     = "can0"
+channel                      = "can0"   # fallback — each motor overrides this
 # required – python-can bus type
 bustype                     = "socketcan"
 # required – must match motor firmware (1 Mbps for DM-J43xx)
@@ -38,7 +38,7 @@ joint_limit_max     =  5.05
 # optional – subtracted from raw motor position to give user-frame position (rad)
 #motor_homing_pos    =  0.0
 # optional – velocity command clamp (rad/s); no clamp if absent
-max_vel             =  10.0
+max_vel             =  30.0
 # optional – acceleration clamp applied to action server goals (rad/s²); no clamp if absent
 #max_accel           =  5.0
 # optional – deceleration clamp (rad/s²); stored but not yet applied in commands
@@ -65,4 +65,4 @@ motor_id = 7
 channel = "can4"
 joint_limit_min     = 0.02
 joint_limit_max     = 5.05
-max_vel             = 10.0
+max_vel             = 30.0
