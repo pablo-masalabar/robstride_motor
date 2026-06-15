@@ -4,13 +4,13 @@
 node_name                  = "right_arm" # ROS2 node name
 use_node_name_as_topic_base = true        # false → topics are published at root namespace
 master_id               = 253          # host CAN ID embedded in outgoing frames (0xFD)
-channel                 = "can2"       # SocketCAN network interface name
+channel                 = "can4"       # SocketCAN network interface name
 bustype                 = "socketcan"  # python-can bus type
 bitrate                 = 1000000      # CAN baud rate in bps
 rx_timeout              = 0.05         # reply wait time in seconds
 active_report_interval_ms = 10         # motor autonomous push interval (minimum 10 ms)
 update_rate_hz            = 30.0      # feedback publish rate (Hz)
-operation_mode            = "OPERATION"
+operation_mode            = "POSITION_PP"
 
 [SpR]
 type = "RS04"
@@ -20,6 +20,7 @@ joint_limit_max = 2.6241
 motor_homing_pos = 0.0084
 max_torque = 120.0
 max_current = 90.0
+loc_kp = 10.0
 [SrR]
 type = "RS04"
 motor_id = 17
@@ -28,6 +29,7 @@ joint_limit_max = 0.2134
 motor_homing_pos = -0.0515
 max_torque = 120.0
 max_current = 90.0
+loc_kp = 10.0
 [SwR]
 type = "RS03"
 motor_id = 18
@@ -63,6 +65,8 @@ max_current = 23.0
 [WrR]
 type = "RS02"
 motor_id = 22
+joint_limit_min = -1.74
+joint_limit_max = 1.82
 motor_homing_pos = -0.023
 max_torque = 17.0
 max_current = 23.0

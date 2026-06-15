@@ -4,7 +4,7 @@
 node_name                  = "base_and_neck" # ROS2 node name
 use_node_name_as_topic_base = true        # false → topics are published at root namespace
 master_id               = 253          # host CAN ID embedded in outgoing frames (0xFD)
-channel                 = "can1"       # SocketCAN network interface name
+channel                 = "can5"       # SocketCAN network interface name
 bustype                 = "socketcan"  # python-can bus type
 bitrate                 = 1000000      # CAN baud rate in bps
 rx_timeout              = 0.05         # reply wait time in seconds
@@ -15,42 +15,53 @@ operation_mode            = "OPERATION"
 [BwC]
 type = "RS02"
 motor_id = 112
-joint_limit_min = -1.57
-joint_limit_max = 1.57
+joint_limit_min = -1.7
+joint_limit_max = 1.7
 operation_mode = "POSITION_PP"
+motor_homing_pos = 0.0
 [BwR]
 type = "RS02"
 motor_id = 113
-joint_limit_min = -1.57
-joint_limit_max = 1.57
+joint_limit_min = -1.8
+joint_limit_max = 1.8
 operation_mode = "POSITION_PP"
+motor_homing_pos = 0.0
 [BwL]
 type = "RS02"
 motor_id = 114
-joint_limit_min = -1.57
-joint_limit_max = 1.57
+joint_limit_min = -1.85
+joint_limit_max = 1.85
 operation_mode = "POSITION_PP"
+motor_homing_pos = 0.0
 [BpC]
 type = "RS01"
 motor_id = 115
 operation_mode = "VELOCITY"
+acceleration  = 20.0
+max_current = 23.0
 [BpR]
 type = "RS01"
 motor_id = 116
 operation_mode = "VELOCITY"
+acceleration  = 20.0
+max_current = 23.0
 [BpL]
 type = "RS01"
 motor_id = 117
 operation_mode = "VELOCITY"
+acceleration  = 20.0
+max_current = 23.0
 [NpC]
 type = "RS05"
 motor_id = 48
-joint_limit_min = -2.18
-joint_limit_max = 0.0
+joint_limit_min = -2.1
+joint_limit_max = 0.02
 operation_mode = "POSITION_PP"
+motor_homing_pos = 0.0
 [NwC]
 type = "RS05"
 motor_id = 49
 joint_limit_min = -1.6
 joint_limit_max = 1.67
 operation_mode = "POSITION_PP"
+motor_homing_pos = 0.0
