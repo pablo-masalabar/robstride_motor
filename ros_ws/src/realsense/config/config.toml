@@ -9,9 +9,9 @@ disconnect_timeout_s = 5.0   # seconds of consecutive timeouts before treating a
 
 # ── Streams ───────────────────────────────────────────────────────────────────
 enable_color = true
-enable_depth = true
+enable_depth = false
 
-color_fps   = 30.0
+color_fps   = 5.0
 depth_fps   = 30.0
 
 # D405 supported combos: 640×480@30/15/5, 848×480@10/5, 1280×720@color15/depth5
