@@ -2,7 +2,7 @@
 
 [defaults]
 node_name                = "torso"
-channel                  = "can1"
+channel                  = "can5"
 bustype                  = "socketcan"
 bitrate                  = 1000000
 rx_timeout               = 0.1        # SDO reply timeout (s)
@@ -16,9 +16,9 @@ node_id              = 9
 # operation_mode     = "CSP"     # per-motor override (optional)
 joint_limit_min      = -6.2832   # rad  (-2π)
 joint_limit_max      =  6.2832   # rad  (+2π)
-profile_velocity     =  5.0      # rad/s  written to 6081h at startup
-profile_acceleration = 10.0      # rad/s² written to 6083h at startup
-profile_deceleration = 10.0      # rad/s² written to 6084h at startup
+profile_velocity     =  100.0      # rad/s  written to 6081h at startup
+profile_acceleration = 100.0      # rad/s² written to 6083h at startup
+profile_deceleration = 100.0      # rad/s² written to 6084h at startup
 max_torque           = 3.81      # N·m   peak output torque (3000‰ rated) — written to 6072h at startup
 
 # Linear actuator height limits — used by go_to and safe_vel topics
