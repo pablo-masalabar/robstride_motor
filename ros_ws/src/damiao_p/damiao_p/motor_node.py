@@ -212,6 +212,7 @@ class MotorNode(Node):
         self._motor_locks:   Dict[str, threading.Lock]   = {}
         self._motor_cfg:     Dict[str, dict]             = {}
         self._report_timers: Dict[str, object]           = {}  # per-motor active-report timers
+        self._last_cmd_time: Dict[str, float]            = {}  # per-motor last command timestamp
 
         self._init_motors(config)
 
@@ -517,6 +518,7 @@ class MotorNode(Node):
     # ── Command subscribers ────────────────────────────────────────────────────
 
     def _on_cmd_mit(self, msg: OperationCommand, name: str) -> None:
+        self._last_cmd_time[name] = time.monotonic()
         if not self._check_mode(name, RunMode.MIT):
             return
         motor_pos = self._clamp_position(name, self._motor_pos(name, msg.position))
@@ -536,6 +538,7 @@ class MotorNode(Node):
                 self.get_logger().error(f'[{name}] MIT command error: {e}')
 
     def _on_cmd_position_pv(self, msg: PositionPPCommand, name: str) -> None:
+        self._last_cmd_time[name] = time.monotonic()
         if not self._check_mode(name, RunMode.POSITION_VELOCITY):
             return
         motor_pos = self._clamp_position(name, self._motor_pos(name, msg.position))
@@ -550,6 +553,7 @@ class MotorNode(Node):
                 self.get_logger().error(f'[{name}] position_pv command error: {e}')
 
     def _on_cmd_velocity(self, msg: VelocityCommand, name: str) -> None:
+        self._last_cmd_time[name] = time.monotonic()
         if not self._check_mode(name, RunMode.VELOCITY):
             return
         vel = self._clamp_vel(name, msg.velocity)
@@ -560,6 +564,7 @@ class MotorNode(Node):
                 self.get_logger().error(f'[{name}] velocity command error: {e}')
 
     def _on_cmd_force_position(self, msg: PositionCSPCommand, name: str) -> None:
+        self._last_cmd_time[name] = time.monotonic()
         # Reuses PositionCSPCommand: position (rad), speed_limit (rad/s, 0-100),
         # current_limit (per-unit 0-1.0 fraction of Imax).
         if not self._check_mode(name, RunMode.FORCE_POSITION_HYBRID):
@@ -889,14 +894,16 @@ class MotorNode(Node):
                 self._report_timers[name] = None
 
             if req.enable:
-                def _make_cb(motor_name: str):
+                def _make_cb(motor_name: str, interval: float):
                     def cb():
                         motor = self._motors.get(motor_name)
                         if motor is None:
                             return
-                        # Idempotent ping: matches current state so nothing
-                        # changes, but the motor always replies with a fresh
-                        # feedback frame which _on_feedback publishes.
+                        # Skip ping if a command was received within this interval —
+                        # commands already elicit a feedback reply from the motor.
+                        last = self._last_cmd_time.get(motor_name, 0.0)
+                        if time.monotonic() - last < interval:
+                            return
                         with self._motor_locks[motor_name]:
                             try:
                                 if self._motor_enabled.get(motor_name, False):
@@ -909,7 +916,7 @@ class MotorNode(Node):
 
                 self._report_timers[name] = self.create_timer(
                     1.0 / req.hz,
-                    _make_cb(name),
+                    _make_cb(name, 1.0 / req.hz),
                     callback_group=self._cb_services,
                 )
 
