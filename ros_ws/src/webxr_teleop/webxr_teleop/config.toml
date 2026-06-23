@@ -4,9 +4,21 @@ node_name = "webxr_teleop"
 
 debug = false   # when true, commands are logged but NOT published to motors
 
+enable_motors_on_startup  = true   # call enable_motors for all motors during setup
+forwarding_enabled        = true   # start forwarding zenoh commands to motors immediately
+
 robstride_motor_mode = "pp"
 damiao_motor_mode    = "position_velocity"
 ezmotion_motor_mode  = "pp"
+
+# Gravity compensation — requires robstride_motor_mode = "operation"
+use_jd              = false
+left_arm_urdf_path  = "urdf/left_arm/feather_arm_left_8dof.urdf"   # relative to this config file, or absolute
+right_arm_urdf_path = "urdf/right_arm/feather_arm_right_8dof.urdf"
+left_ee_frame       = "arm_to_gripperL"
+right_ee_frame      = "arm_to_gripperR"
+# Base motor names (no L/R suffix) — must match joint names in URDF
+arm_motors          = ["Sp", "Sr", "Sw", "Ep", "Ww", "Wp", "Wr"]
 
 # robstride_active_report_hz = 30.0   # optional — overrides per-node active report rate
 # damiao_active_report_hz    = 50.0   # optional — overrides per-node active report rate
@@ -16,200 +28,240 @@ joints_state_publish_hz = 30.0   # optional — falls back to active_report_hz i
 # zenoh_config   = "zenoh_config.json5"   # optional — path to zenoh JSON5 config file
 
 # Feedback keys (ROS → Zenoh)
-left_arm_zenoh_key      = "robot/feedback/left_arm"
-right_arm_zenoh_key     = "robot/feedback/right_arm"
-left_gripper_zenoh_key  = "robot/feedback/left_gripper"
-right_gripper_zenoh_key = "robot/feedback/right_gripper"
-torso_zenoh_key         = "robot/feedback/torso"
-neck_zenoh_key          = "robot/feedback/neck"
-chassis_zenoh_key       = "robot/feedback/chassis"
+left_arm_zenoh_key      = "feather/feedback_arm_left"
+right_arm_zenoh_key     = "feather/feedback_arm_right"
+left_gripper_zenoh_key  = "feather/feedback_gripper_left"
+right_gripper_zenoh_key = "feather/feedback_gripper_right"
+torso_zenoh_key         = "feather/feedback_torso"
+neck_zenoh_key          = "feather/feedback_neck"
+chassis_zenoh_key       = "feather/feedback_chassis"
 
 # Command keys (Zenoh → ROS)
-left_arm_cmd_zenoh_key      = "robot/cmd/left_arm"
-right_arm_cmd_zenoh_key     = "robot/cmd/right_arm"
-left_gripper_cmd_zenoh_key  = "robot/cmd/left_gripper"
-right_gripper_cmd_zenoh_key = "robot/cmd/right_gripper"
-torso_cmd_zenoh_key         = "robot/cmd/torso"
-neck_cmd_zenoh_key          = "robot/cmd/neck"
-chassis_cmd_zenoh_key       = "robot/cmd/chassis"
+left_arm_cmd_zenoh_key      = "feather/joints_cmd/arm_left"
+right_arm_cmd_zenoh_key     = "feather/joints_cmd/arm_right"
+left_gripper_cmd_zenoh_key  = "feather/cmd/left_gripper"
+right_gripper_cmd_zenoh_key = "feather/cmd/right_gripper"
+torso_cmd_zenoh_key         = "feather/joints_cmd/torso"
+neck_cmd_zenoh_key          = "feather/joints_cmd/neck"
+chassis_cmd_zenoh_key       = "feather/joints_cmd/chassis"
 
 # Zenoh motor groups — maps group name to motor list.
 # Group names must match the *_zenoh_key / *_cmd_zenoh_key prefixes above.
 [zenoh_motor_groups]
-left_arm      = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL"]
-right_arm     = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR"]
-left_gripper  = ["AgL"]
-right_gripper = ["AgR"]
+left_arm      = ["SpL", "SrL", "SwL", "EpL", "WwL", "WpL", "WrL", "AgL"]
+right_arm     = ["SpR", "SrR", "SwR", "EpR", "WwR", "WpR", "WrR", "AgR"]
 torso         = ["torso"]
 neck          = ["NpC", "NwC"]
 chassis       = ["BwC", "BwR", "BwL", "BpC", "BpR", "BpL"]
 
 # --- Left arm (robstride, can0) ---
 [left_arm]
-# active_report_hz            = 30.0
+active_report_hz            = 30.0
+cmd_defaults                = "robstride_pp_defaults"
 # enable_disable_service_name = "/left_arm/enable_motor"
+cmd_topic_pattern      = "/left_arm/motors/{motor_name}/cmd_position_pp"
+feedback_topic_pattern = "/left_arm/motors/{motor_name}/state"
 
 [left_arm.SpL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/SpL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [left_arm.SrL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/SrL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [left_arm.SwL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/SwL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [left_arm.EpL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/EpL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [left_arm.WwL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/WwL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [left_arm.WpL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/WpL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [left_arm.WrL]
-cmd_topic_name      = "/left_arm/cmd_position_pp"
-feedback_topic_name = "/left_arm/motors/WrL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 # --- Right arm (robstride, can2) ---
 [right_arm]
-# active_report_hz            = 30.0
+active_report_hz            = 30.0
+cmd_defaults                = "robstride_pp_defaults"
 # enable_disable_service_name = "/right_arm/enable_motor"
+cmd_topic_pattern      = "/right_arm/motors/{motor_name}/cmd_position_pp"
+feedback_topic_pattern = "/right_arm/motors/{motor_name}/state"
 
 [right_arm.SpR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/SpR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [right_arm.SrR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/SrR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [right_arm.SwR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/SwR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [right_arm.EpR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/EpR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [right_arm.WwR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/WwR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [right_arm.WpR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/WpR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 [right_arm.WrR]
-cmd_topic_name      = "/right_arm/cmd_position_pp"
-feedback_topic_name = "/right_arm/motors/WrR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
 
 # --- Base and neck (robstride, can0) ---
 [base_and_neck]
-# active_report_hz            = 30.0
+active_report_hz            = 30.0
 # enable_disable_service_name = "/base_and_neck/enable_motor"
+cmd_topic_pattern      = "/base_and_neck/motors/{motor_name}/cmd_position_pp"
+feedback_topic_pattern = "/base_and_neck/motors/{motor_name}/state"
+
+# Neck pitch (NpC) calibration — zenoh/URDF range is [-0.52, 1.57] rad.
+neck_pitch_low  = -2.1   # hw motor position (rad) corresponding to zenoh -0.52
+neck_pitch_high =  0.02  # hw motor position (rad) corresponding to zenoh  1.57
 
 [base_and_neck.BwC]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/BwC/state"
-motor_type          = "robstride"
+motor_type = "robstride"
+cmd_defaults = "robstride_pp_defaults"
 
 [base_and_neck.BwR]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/BwR/state"
-motor_type          = "robstride"
+motor_type = "robstride"
+cmd_defaults = "robstride_pp_defaults"
 
 [base_and_neck.BwL]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/BwL/state"
-motor_type          = "robstride"
+motor_type = "robstride"
+cmd_defaults = "robstride_pp_defaults"
 
 [base_and_neck.BpC]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/BpC/state"
-motor_type          = "robstride"
+motor_type        = "robstride"
+mode              = "velocity"
+cmd_defaults      = "robstride_vel_defaults"
+cmd_topic_pattern = "/base_and_neck/motors/{motor_name}/cmd_velocity"
 
 [base_and_neck.BpR]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/BpR/state"
-motor_type          = "robstride"
+motor_type        = "robstride"
+mode              = "velocity"
+cmd_defaults      = "robstride_vel_defaults"
+cmd_topic_pattern = "/base_and_neck/motors/{motor_name}/cmd_velocity"
 
 [base_and_neck.BpL]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/BpL/state"
-motor_type          = "robstride"
+motor_type        = "robstride"
+mode              = "velocity"
+cmd_defaults      = "robstride_vel_defaults"
+cmd_topic_pattern = "/base_and_neck/motors/{motor_name}/cmd_velocity"
 
 [base_and_neck.NpC]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/NpC/state"
-motor_type          = "robstride"
+motor_type = "robstride"
+cmd_defaults = "robstride_pp_defaults"
 
 [base_and_neck.NwC]
-cmd_topic_name      = "/base_and_neck/cmd_position_pp"
-feedback_topic_name = "/base_and_neck/motors/NwC/state"
-motor_type          = "robstride"
+motor_type = "robstride"
+cmd_defaults = "robstride_pp_defaults"
 
 # --- Torso (ezmotion linear actuator) ---
 [torso]
-# active_report_hz            = 30.0
+active_report_hz            = 30.0
+cmd_defaults                = "ezmotion_pp_defaults"
 # enable_disable_service_name = "/ezmotion/enable_motor"
+cmd_topic_pattern      = "/torso/motors/{motor_name}/go_to"
+feedback_topic_pattern = "/torso/motors/{motor_name}/processed_state"
+
+# Motor position (mm) corresponding to URDF torso_lift_joint = 0.0 m (fully extended / home).
+# cmd_mm = torso_home_mm + lift_m * 1000;  lift_m = (cmd_mm - torso_home_mm) / 1000
+torso_home_mm = 600.0
 
 [torso.torso]
-cmd_topic_name      = "/ezmotion/go_to"
-feedback_topic_name = "/ezmotion/motors/torso/processed_state"
-motor_type          = "ezmotion"
+motor_type = "ezmotion"
 
 # --- Grippers (damiao) ---
 [grippers]
-# active_report_hz            = 50.0
+active_report_hz            = 30.0
+cmd_defaults                = "damiao_pv_defaults"
 # enable_disable_service_name = "/grippers/enable_motor"
-
-[grippers.AgL]
-cmd_topic_name      = "/grippers/cmd_position_pv"
-feedback_topic_name = "/grippers/motors/AgL/state"
-motor_type          = "damiao"
-
-[grippers.AgR]
-cmd_topic_name      = "/grippers/cmd_position_pv"
-feedback_topic_name = "/grippers/motors/AgR/state"
-motor_type          = "damiao"
+cmd_topic_pattern      = "/grippers/motors/{motor_name}/cmd_position_pv"
+feedback_topic_pattern = "/grippers/motors/{motor_name}/state"
 
 # Gripper range — motor positions corresponding to fully contracted and expanded states.
 # Zenoh commands arrive as 0.0 (contracted) to 1.0 (expanded) and are scaled to these limits.
 # Feedback is scaled back to 0..1 before publishing to Zenoh.
-gripper_expanded_val   =  0.02   # rad — fully open
-gripper_contracted_val =  5.0   # rad — fully closed
+gripper_open_val   =  0.02   # rad — motor position when fully open
+gripper_closed_val =  5.0    # rad — motor position when fully closed
+
+[grippers.AgL]
+motor_type = "damiao"
+
+[grippers.AgR]
+motor_type = "damiao"
+
+[robstride_operation_defaults]
+kp = 8.0
+kd = 0.0
+# torque_ff is always from gravity compensation (use_jd=true) or 0.0 (use_jd=false)
 
 [robstride_pp_defaults]
-speed        = 15.0   # rad/s
-acceleration = 10.0   # rad/s²
-deceleration = 10.0   # rad/s²
-torque_limit = 25.0   # N·m
+speed        = 30.0   # rad/s
+acceleration = 50.0   # rad/s²
+deceleration = 50.0   # rad/s²
+torque_limit = 0.0   # N·m
+
+[robstride_vel_defaults]
+acceleration  = 20.0   # rad/s²
+current_limit = 23.0   # A
 
 [ezmotion_pp_defaults]
-speed        = 25.0   # rad/s — profile_velocity written to motor at go_to
-acceleration = 10.0   # rad/s²
-deceleration = 10.0   # rad/s²
+speed        = 100.0   # rad/s — profile_velocity written to motor at go_to
+acceleration = 100.0   # rad/s²
+deceleration = 100.0   # rad/s²
 
 [damiao_pv_defaults]
-speed = 5.0    # rad/s — acc/dec set via motor registers at startup
+speed = 25.0    # rad/s — acc/dec set via motor registers at startup
+
+# --- Arm poses (optional) ---
+# Named motor-position snapshots sent via the ~/set_arm_pose service.
+# Call: ros2 service call ~/set_arm_pose custom_interfaces/srv/EnableMotors "{name: 'home'}"
+# Each sub-table key is the pose name; entries are motor_name = position (rad or m).
+#
+
+[set_arm_pose_pp_defaults]
+speed        = 2.5   # rad/s
+acceleration = 5.0   # rad/s²
+deceleration = 5.0   # rad/s²
+torque_limit = 0.0   # N·m
+
+
+[arm_poses.home]
+cmd_defaults = "set_arm_pose_pp_defaults"
+SpL = 0.0
+SrL = 0.0
+EpL = 0.0
+WwL = 0.0
+WpL = 0.0
+WrL = 0.0
+SpR = 0.0
+SrR = 0.0
+EpR = 0.0
+WwR = 0.0
+WpR = 0.0
+WrR = 0.0
+AgL = 2.5
+AgR = 2.5
+
+[arm_poses.elbow_up]
+cmd_defaults = "set_arm_pose_pp_defaults"
+SpL = 0.0
+SrL = 0.0
+EpL = -1.57
+WwL = 0.0
+WpL = 0.0
+WrL = 0.0
+SpR = 0.0
+SrR = 0.0
+EpR = 1.57
+WwR = 0.0
+WpR = 0.0
+WrR = 0.0
+AgR = 2.5
+AgL = 2.5

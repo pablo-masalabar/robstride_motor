@@ -12,6 +12,8 @@ setup(
         ('share/webxr_teleop',        ['package.xml']),
         ('share/webxr_teleop/launch', glob.glob('launch/*')),
         ('share/webxr_teleop/config', glob.glob('config/*')),
+        ('share/webxr_teleop/urdf/left_arm',  glob.glob('webxr_teleop/urdf/left_arm/*')),
+        ('share/webxr_teleop/urdf/right_arm', glob.glob('webxr_teleop/urdf/right_arm/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
