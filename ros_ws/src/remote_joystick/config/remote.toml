@@ -7,5 +7,5 @@ joy_topic = "joy"
 mode = "server"
 
 # Network interface to listen on (0.0.0.0 = all interfaces)
-listen_host = "127.0.0.1"
+listen_host = "192.168.10.175"
 listen_port = 5566

@@ -7,4 +7,4 @@ joy_topic = "joy"
 mode = "client"
 
 # URL of the remote machine running the server
-server_url = "http://50.18.224.111:15010"
+server_url = "http://192.168.10.175:5566"
