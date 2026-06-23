@@ -41,9 +41,11 @@ class TeleopNode(Node):
         self._motors:           Dict[str, str]  = dict(cfg['motors'])
         self._prefix:           str             = cfg.get('motor_node_prefix', '')
         self._active_report_hz: float           = float(cfg.get('active_report_hz', 50.0))
-        self._max_linear_vel: float = float(cfg.get('max_linear_vel', 1.0))
-        self._wheel_radius:   float = float(cfg.get('wheel_radius',   0.1))
-        self._joy_timeout:    float = float(cfg.get('joy_timeout',    0.5))
+        self._max_linear_vel:      float = float(cfg.get('max_linear_vel',      1.0))
+        self._wheel_radius:        float = float(cfg.get('wheel_radius',        0.1))
+        self._joy_timeout:         float = float(cfg.get('joy_timeout',         0.5))
+        self._velocity_multiplier: float = -1.0 if float(cfg.get('velocity_multiplier', 1.0)) < 0 else 1.0
+        self._steering_multiplier: float = -1.0 if float(cfg.get('steering_multiplier', 1.0)) < 0 else 1.0
         self._joy_topic:        str             = cfg.get('joy_topic', '/joy')
 
         joy_axes                      = cfg.get('joy_axes', {})
@@ -314,7 +316,7 @@ class TeleopNode(Node):
             return
 
         # ── Axis commands ─────────────────────────────────────────────────────
-        linear          = self._axis_value(msg, self._axis_wheel) * self._max_linear_vel * self._speed_scale * -1.0
+        linear          = self._axis_value(msg, self._axis_wheel) * self._max_linear_vel * self._speed_scale * -1.0 * self._velocity_multiplier
         wheel_vel_rad_s = linear / self._wheel_radius
 
         if self._in_place_rotate:
@@ -328,7 +330,7 @@ class TeleopNode(Node):
             self._publish_wheel('front_left_wheel',  wheel_vel_rad_s)
             self._publish_wheel('front_right_wheel', wheel_vel_rad_s * -1.0)
             self._publish_wheel('rear_wheel',        wheel_vel_rad_s)
-            steer_angle = self._axis_value(msg, self._axis_steer) * self._max_steering_angle
+            steer_angle = self._axis_value(msg, self._axis_steer) * self._max_steering_angle * self._steering_multiplier
             self._publish_steer('front_left_steer',  steer_angle)
             self._publish_steer('front_right_steer', steer_angle)
             self._publish_steer('rear_steer',        steer_angle)
