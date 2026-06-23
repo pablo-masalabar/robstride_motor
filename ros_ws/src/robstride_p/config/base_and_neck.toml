@@ -15,8 +15,8 @@ operation_mode            = "OPERATION"
 [BwC]
 type = "RS02"
 motor_id = 112
-joint_limit_min = -1.7
-joint_limit_max = 1.7
+joint_limit_min = -1.74
+joint_limit_max = 1.74
 operation_mode = "POSITION_PP"
 motor_homing_pos = 0.0
 [BwR]
