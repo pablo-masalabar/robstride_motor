@@ -635,8 +635,8 @@ class MotorNode(Node):
             return
         lim   = self._motor_cfg[name]
         vel   = self._clamp_vel(name, msg.velocity)
-        kp    = float(lim['kp']) if lim['kp'] is not None else 0.0
-        kd    = float(lim['kd']) if lim['kd'] is not None else 0.0
+        kp    = msg.kp if msg.kp != 0.0 else (float(lim['kp']) if lim['kp'] is not None else 0.0)
+        kd    = msg.kd if msg.kd != 0.0 else (float(lim['kd']) if lim['kd'] is not None else 0.0)
         motor = self._motors[name]
         with self._motor_locks[name]:
             try:
