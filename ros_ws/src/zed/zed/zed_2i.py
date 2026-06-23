@@ -109,6 +109,10 @@ class Zed2i:
         self.color_rectification_crop: bool = kwargs["color_rectification_crop"]
         self.topic_prefix: str = kwargs["topic_prefix"]
         self.topic_prefix = "" if not self.topic_prefix else f"{self.topic_prefix}/"
+        self.topic_color            = kwargs.get("topic_color")            or f"{self.topic_prefix}color"
+        self.topic_color_rectified  = kwargs.get("topic_color_rectified")  or f"{self.topic_prefix}color/rectified"
+        self.topic_stereo           = kwargs.get("topic_stereo")           or f"{self.topic_prefix}stereo"
+        self.topic_imu              = kwargs.get("topic_imu")              or f"{self.topic_prefix}imu"
 
         self.zed = sl.Camera()
         self._runtime_params = sl.RuntimeParameters()
@@ -161,10 +165,10 @@ class Zed2i:
             )
             self._left_rect_props = {"K": K, "K_rect": K_rect, "dist": dist, "roi": roi}
             self.left_rectified_pub = self.session.declare_publisher(
-                f"{self.topic_prefix}color/rectified"
+                self.topic_color_rectified
             )
 
-        self.left_pub = self.session.declare_publisher(f"{self.topic_prefix}color")
+        self.left_pub = self.session.declare_publisher(self.topic_color)
 
     def init_depth(self, calibration: sl.CalibrationParameters):
         if self._left_intrinsics is None:
@@ -180,10 +184,10 @@ class Zed2i:
         self._runtime_params.confidence_threshold = self.depth_confidence
         self._runtime_params.enable_fill_mode     = self.enable_fill_mode
 
-        self.stereo_pub = self.session.declare_publisher(f"{self.topic_prefix}stereo")
+        self.stereo_pub = self.session.declare_publisher(self.topic_stereo)
 
     def init_imu(self):
-        self.imu_pub = self.session.declare_publisher(f"{self.topic_prefix}imu")
+        self.imu_pub = self.session.declare_publisher(self.topic_imu)
 
     # ── per-frame callbacks ───────────────────────────────────────────────────
 
@@ -439,7 +443,7 @@ HD2K   — 2208 × 1242 @  15 fps
     parser.add_argument(
         "--serial",
         type=str,
-        default="",
+        default="33647906",
         help="Device serial number. Empty string connects to first available device.",
     )
     parser.add_argument(
@@ -451,8 +455,8 @@ HD2K   — 2208 × 1242 @  15 fps
     parser.add_argument(
         "--enable-depth",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable depth stream (default: on).",
+        default=False,
+        help="Enable depth stream (default: off).",
     )
     parser.add_argument(
         "--resolution",
@@ -499,8 +503,8 @@ HD2K   — 2208 × 1242 @  15 fps
     parser.add_argument(
         "--enable-imu",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable IMU stream on <prefix>/imu (default: on).",
+        default=False,
+        help="Enable IMU stream on <prefix>/imu (default: off).",
     )
     parser.add_argument(
         "--enable-color-rectification",
@@ -522,7 +526,31 @@ HD2K   — 2208 × 1242 @  15 fps
         "--topic-prefix",
         type=str,
         default="zed2i",
-        help="Zenoh topic prefix.",
+        help="Zenoh topic prefix (used to build default topic names).",
+    )
+    parser.add_argument(
+        "--topic-color",
+        type=str,
+        default="",
+        help="Zenoh topic for left colour frames. Defaults to <prefix>/color.",
+    )
+    parser.add_argument(
+        "--topic-color-rectified",
+        type=str,
+        default="",
+        help="Zenoh topic for rectified left colour frames. Defaults to <prefix>/color/rectified.",
+    )
+    parser.add_argument(
+        "--topic-stereo",
+        type=str,
+        default="",
+        help="Zenoh topic for stereo+depth frames. Defaults to <prefix>/stereo.",
+    )
+    parser.add_argument(
+        "--topic-imu",
+        type=str,
+        default="",
+        help="Zenoh topic for IMU data. Defaults to <prefix>/imu.",
     )
 
     args = vars(parser.parse_args())
