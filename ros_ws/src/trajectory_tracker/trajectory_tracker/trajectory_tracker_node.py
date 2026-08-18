@@ -1302,6 +1302,28 @@ class TrajectoryTrackerNode(Node):
             motors_to_record += self._right_arm_motors
             motors_to_record += self._right_gripper_motors
 
+        if bool(goal_handle.request.disable_motors_before_record):
+            prefixes_to_disable: set = set()
+            if use_left:
+                prefixes_to_disable.add(self._left_arm_prefix)
+                if self._left_gripper_prefix:
+                    prefixes_to_disable.add(self._left_gripper_prefix)
+            if use_right:
+                prefixes_to_disable.add(self._right_arm_prefix)
+                if self._right_gripper_prefix:
+                    prefixes_to_disable.add(self._right_gripper_prefix)
+            for prefix in prefixes_to_disable:
+                en_client = self._get_enable_motor_client(prefix)
+                if not en_client.wait_for_service(timeout_sec=3.0):
+                    self.get_logger().warning(f'{prefix}/enable_motor not available — skipping disable')
+                    continue
+                dis_req             = EnableMotor.Request()
+                dis_req.name        = 'all'
+                dis_req.enable      = False
+                dis_req.clear_fault = False
+                en_client.call(dis_req)
+                self.get_logger().info(f'[{prefix}] motors disabled before recording')
+
         # Subscribe to any motors not already covered by the existing recording subs
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         extra_subs = []

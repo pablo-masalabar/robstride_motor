@@ -65,10 +65,10 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 
 from custom_interfaces.msg import (
+    ForcePositionHybridCommand,
     MotorFault,
     MotorState,
     OperationCommand,
-    PositionCSPCommand,
     PositionPPCommand,
     VelocityCommand,
 )
@@ -165,6 +165,7 @@ _SOFTWARE_MOTOR_PARAMS = frozenset({
     'joint_limit_min', 'joint_limit_max',
     'motor_homing_pos',
     'max_vel', 'max_accel', 'max_decel',
+    'current_per_unit',
 })
 
 _ALL_MOTOR_PARAMS = frozenset(_FIRMWARE_MOTOR_PARAMS) | _SOFTWARE_MOTOR_PARAMS
@@ -239,7 +240,7 @@ class MotorNode(Node):
             (OperationCommand,  'cmd_mit',           self._on_cmd_mit),
             (PositionPPCommand, 'cmd_position_pv',   self._on_cmd_position_pv),
             (VelocityCommand,   'cmd_velocity',      self._on_cmd_velocity),
-            (PositionCSPCommand,'cmd_force_position', self._on_cmd_force_position),
+            (ForcePositionHybridCommand, 'cmd_force_position', self._on_cmd_force_position),
         ]
         for name in self._motors:
             for msg_type, suffix, cb in _mode_subs:
@@ -563,18 +564,18 @@ class MotorNode(Node):
             except Exception as e:
                 self.get_logger().error(f'[{name}] velocity command error: {e}')
 
-    def _on_cmd_force_position(self, msg: PositionCSPCommand, name: str) -> None:
+    def _on_cmd_force_position(self, msg: ForcePositionHybridCommand, name: str) -> None:
         self._last_cmd_time[name] = time.monotonic()
-        # Reuses PositionCSPCommand: position (rad), speed_limit (rad/s, 0-100),
-        # current_limit (per-unit 0-1.0 fraction of Imax).
         if not self._check_mode(name, RunMode.FORCE_POSITION_HYBRID):
             return
         motor_pos = self._clamp_position(name, self._motor_pos(name, msg.position))
-        if msg.speed_limit > 0.0:
-            speed = self._clamp_vel(name, msg.speed_limit)
+        if msg.velocity > 0.0:
+            speed = self._clamp_vel(name, msg.velocity)
         else:
             speed = float(self._motor_cfg[name].get('max_vel') or self._motors[name].V_MAX)
-        i_pu    = min(max(msg.current_limit, 0.0), 1.0) if msg.current_limit > 0.0 else 1.0
+        cfg_i_pu = self._motor_cfg[name].get('current_per_unit')
+        i_pu     = (min(max(msg.current_per_unit, 0.0), 1.0) if msg.current_per_unit > 0.0
+                    else (float(cfg_i_pu) if cfg_i_pu is not None else 1.0))
         with self._motor_locks[name]:
             try:
                 self._motors[name].set_force_position(motor_pos, speed, i_pu)

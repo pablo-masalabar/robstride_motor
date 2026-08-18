@@ -21,7 +21,7 @@ profile_acceleration = 100.0      # rad/s² written to 6083h at startup
 profile_deceleration = 100.0      # rad/s² written to 6084h at startup
 max_torque           = 3.81      # N·m   peak output torque (3000‰ rated) — written to 6072h at startup
 
-# Linear actuator height limits — used by go_to and safe_vel topics
+# Linear actuator height limits — used by go_to topic
 top_height_mm    = 600.0   # mm — maximum height (hard stop / homing position)
 bottom_height_mm =  50.0   # mm — minimum height
 homing_height_mm = 600.0   # mm — physical height at motor position 0 (after homing)
@@ -29,7 +29,7 @@ homing_height_mm = 600.0   # mm — physical height at motor position 0 (after h
 # Homing parameters (DS402 homing mode)
 homing_method             = -3     # -3 = HOME_USING_MAX_TORQUE_UP (torque hard-stop)
 homing_max_torque_permil = 500   # 100% rated torque — written to 2070h sub1
-homing_speed_rps          = 1.0    # rad/s — written to 6099h sub1 and sub2
+homing_speed_rps          = 5.0    # rad/s — written to 6099h sub1 and sub2
 homing_acceleration_rps2  = 50.0   # rad/s² — written to 609Ah
 homing_offset_rotations   = 1.0    # rotations offset from hard stop — written to 607Ch
 homing_timeout            = 60.0   # seconds to wait for homing-attained (statusword bit 12)

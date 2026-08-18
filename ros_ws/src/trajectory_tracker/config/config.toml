@@ -79,4 +79,4 @@ speed_limit   = 15.0
 current_limit = 0.0
 
 [damiao_pv_defaults]
-speed = 5.0    # rad/s — acc/dec set via motor registers at startup
+speed = 25.0    # rad/s — acc/dec set via motor registers at startup

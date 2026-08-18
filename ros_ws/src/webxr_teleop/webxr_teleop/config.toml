@@ -7,24 +7,20 @@ debug = false   # when true, commands are logged but NOT published to motors
 enable_motors_on_startup  = true   # call enable_motors for all motors during setup
 forwarding_enabled        = true   # start forwarding zenoh commands to motors immediately
 
-robstride_motor_mode = "pp"
-damiao_motor_mode    = "position_velocity"
-ezmotion_motor_mode  = "pp"
+robstride_motor_mode = "operation"
+damiao_motor_mode    = "force_position_hybrid"
+ezmotion_motor_mode  = "csp"
 
-# Gravity compensation — requires robstride_motor_mode = "operation"
-use_jd              = false
-left_arm_urdf_path  = "urdf/left_arm/feather_arm_left_8dof.urdf"   # relative to this config file, or absolute
-right_arm_urdf_path = "urdf/right_arm/feather_arm_right_8dof.urdf"
-left_ee_frame       = "arm_to_gripperL"
-right_ee_frame      = "arm_to_gripperR"
-# Base motor names (no L/R suffix) — must match joint names in URDF
-arm_motors          = ["Sp", "Sr", "Sw", "Ep", "Ww", "Wp", "Wr"]
+# Minimum position change (mm) required before a new go_to command is published.
+# 0.0 = disabled (publish every zenoh sample). Safe in CSP mode since there is no
+# bit-toggling and the motor just servo-follows whatever it receives.
+go_to_deadband_mm = 0.0
 
 # robstride_active_report_hz = 30.0   # optional — overrides per-node active report rate
 # damiao_active_report_hz    = 50.0   # optional — overrides per-node active report rate
 # ezmotion_active_report_hz  = 30.0   # optional — overrides per-node active report rate
 
-joints_state_publish_hz = 30.0   # optional — falls back to active_report_hz if not set
+#joints_state_publish_hz = 30.0   # optional — falls back to active_report_hz if not set
 # zenoh_config   = "zenoh_config.json5"   # optional — path to zenoh JSON5 config file
 
 # Feedback keys (ROS → Zenoh)
@@ -56,61 +52,75 @@ chassis       = ["BwC", "BwR", "BwL", "BpC", "BpR", "BpL"]
 
 # --- Left arm (robstride, can0) ---
 [left_arm]
-active_report_hz            = 30.0
-cmd_defaults                = "robstride_pp_defaults"
+active_report_hz            = 60.0
+cmd_defaults                = "robstride_upper_arm_operation_defaults"
 # enable_disable_service_name = "/left_arm/enable_motor"
-cmd_topic_pattern      = "/left_arm/motors/{motor_name}/cmd_position_pp"
+cmd_topic_pattern      = "/left_arm/motors/{motor_name}/cmd_operation"
 feedback_topic_pattern = "/left_arm/motors/{motor_name}/state"
 
 [left_arm.SpL]
 motor_type = "robstride"
+cmd_defaults = "robstride_upper_arm_operation_defaults"
 
 [left_arm.SrL]
 motor_type = "robstride"
+cmd_defaults = "robstride_upper_arm_operation_defaults"
 
 [left_arm.SwL]
 motor_type = "robstride"
+cmd_defaults = "robstride_upper_arm_operation_defaults"
 
 [left_arm.EpL]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 [left_arm.WwL]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 [left_arm.WpL]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 [left_arm.WrL]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 # --- Right arm (robstride, can2) ---
 [right_arm]
-active_report_hz            = 30.0
-cmd_defaults                = "robstride_pp_defaults"
+active_report_hz            = 60.0
+cmd_defaults                = "robstride_upper_arm_operation_defaults"
 # enable_disable_service_name = "/right_arm/enable_motor"
-cmd_topic_pattern      = "/right_arm/motors/{motor_name}/cmd_position_pp"
+cmd_topic_pattern      = "/right_arm/motors/{motor_name}/cmd_operation"
 feedback_topic_pattern = "/right_arm/motors/{motor_name}/state"
 
 [right_arm.SpR]
 motor_type = "robstride"
+cmd_defaults = "robstride_upper_arm_operation_defaults"
 
 [right_arm.SrR]
 motor_type = "robstride"
+cmd_defaults = "robstride_upper_arm_operation_defaults"
 
 [right_arm.SwR]
 motor_type = "robstride"
+cmd_defaults = "robstride_upper_arm_operation_defaults"
 
 [right_arm.EpR]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 [right_arm.WwR]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 [right_arm.WpR]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 [right_arm.WrR]
 motor_type = "robstride"
+cmd_defaults = "robstride_lower_arm_operation_defaults"
 
 # --- Base and neck (robstride, can0) ---
 [base_and_neck]
@@ -126,14 +136,17 @@ neck_pitch_high =  0.02  # hw motor position (rad) corresponding to zenoh  1.57
 [base_and_neck.BwC]
 motor_type = "robstride"
 cmd_defaults = "robstride_pp_defaults"
+mode              = "pp"
 
 [base_and_neck.BwR]
 motor_type = "robstride"
 cmd_defaults = "robstride_pp_defaults"
+mode              = "pp"
 
 [base_and_neck.BwL]
 motor_type = "robstride"
 cmd_defaults = "robstride_pp_defaults"
+mode              = "pp"
 
 [base_and_neck.BpC]
 motor_type        = "robstride"
@@ -156,10 +169,12 @@ cmd_topic_pattern = "/base_and_neck/motors/{motor_name}/cmd_velocity"
 [base_and_neck.NpC]
 motor_type = "robstride"
 cmd_defaults = "robstride_pp_defaults"
+mode              = "pp"
 
 [base_and_neck.NwC]
 motor_type = "robstride"
 cmd_defaults = "robstride_pp_defaults"
+mode              = "pp"
 
 # --- Torso (ezmotion linear actuator) ---
 [torso]
@@ -179,9 +194,9 @@ motor_type = "ezmotion"
 # --- Grippers (damiao) ---
 [grippers]
 active_report_hz            = 30.0
-cmd_defaults                = "damiao_pv_defaults"
+cmd_defaults                = "damiao_force_position_defaults"
 # enable_disable_service_name = "/grippers/enable_motor"
-cmd_topic_pattern      = "/grippers/motors/{motor_name}/cmd_position_pv"
+cmd_topic_pattern      = "/grippers/motors/{motor_name}/cmd_force_position"
 feedback_topic_pattern = "/grippers/motors/{motor_name}/state"
 
 # Gripper range — motor positions corresponding to fully contracted and expanded states.
@@ -196,10 +211,10 @@ motor_type = "damiao"
 [grippers.AgR]
 motor_type = "damiao"
 
-[robstride_operation_defaults]
+[robstride_arm_pose_operation_defaults]
 kp = 8.0
-kd = 0.0
-# torque_ff is always from gravity compensation (use_jd=true) or 0.0 (use_jd=false)
+kd = 2.0
+velocity = 0.1
 
 [robstride_pp_defaults]
 speed        = 30.0   # rad/s
@@ -216,8 +231,9 @@ speed        = 100.0   # rad/s — profile_velocity written to motor at go_to
 acceleration = 100.0   # rad/s²
 deceleration = 100.0   # rad/s²
 
-[damiao_pv_defaults]
-speed = 25.0    # rad/s — acc/dec set via motor registers at startup
+[damiao_force_position_defaults]
+velocity         = 25.0   # rad/s — speed limit (0 = use motor V_MAX)
+current_per_unit = 0.3    # 0.0–1.0 — fraction of motor Imax
 
 # --- Arm poses (optional) ---
 # Named motor-position snapshots sent via the ~/set_arm_pose service.
@@ -231,9 +247,16 @@ acceleration = 5.0   # rad/s²
 deceleration = 5.0   # rad/s²
 torque_limit = 0.0   # N·m
 
+[robstride_upper_arm_operation_defaults]
+kp = 15.0
+kd = 1.0
+
+[robstride_lower_arm_operation_defaults]
+kp = 15.0
+kd = 1.0
 
 [arm_poses.home]
-cmd_defaults = "set_arm_pose_pp_defaults"
+cmd_defaults = "robstride_arm_pose_operation_defaults"
 SpL = 0.0
 SrL = 0.0
 EpL = 0.0
@@ -250,7 +273,7 @@ AgL = 2.5
 AgR = 2.5
 
 [arm_poses.elbow_up]
-cmd_defaults = "set_arm_pose_pp_defaults"
+cmd_defaults = "robstride_arm_pose_operation_defaults"
 SpL = 0.0
 SrL = 0.0
 EpL = -1.57
@@ -263,5 +286,39 @@ EpR = 1.57
 WwR = 0.0
 WpR = 0.0
 WrR = 0.0
+AgR = 2.5
+AgL = 2.5
+
+[arm_poses.wrist_open]
+cmd_defaults = "robstride_arm_pose_operation_defaults"
+SpL = 0.0
+SrL = 0.0
+EpL = 0.0
+WwL = 0.0
+WpL = 0.0
+WrL = 0.39
+SpR = 0.0
+SrR = 0.0
+EpR = 0.0
+WwR = 0.0
+WpR = 0.0
+WrR = 0.39
+AgR = 2.5
+AgL = 2.5
+
+[arm_poses.wrist_close]
+cmd_defaults = "robstride_arm_pose_operation_defaults"
+SpL = 0.0
+SrL = 0.0
+EpL = 0.0
+WwL = 0.0
+WpL = 0.0
+WrL = -0.39
+SpR = 0.0
+SrR = 0.0
+EpR = 0.0
+WwR = 0.0
+WpR = 0.0
+WrR = -0.39
 AgR = 2.5
 AgL = 2.5

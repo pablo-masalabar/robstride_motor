@@ -6,6 +6,7 @@
 string trajectory_name
 bool   left_arm_source
 bool   right_arm_source
+bool   disable_motors_before_record
 ---
 bool   success
 string message

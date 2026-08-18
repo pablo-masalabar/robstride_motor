@@ -67,7 +67,6 @@ All topics and services are published under `/{node_name}/` where `node_name` co
 | Subscribed | `/{node_name}/motors/{name}/cmd_position_csp` | `custom_interfaces/PositionCSPCommand` | CSP mode position command (rad) |
 | Subscribed | `/{node_name}/motors/{name}/cmd_velocity` | `custom_interfaces/VelocityCommand` | PV/CSV mode velocity command (rad/s) |
 | Subscribed | `/{node_name}/motors/{name}/go_to` | `std_msgs/Float64` | PP mode: move to absolute height (mm) |
-| Subscribed | `/{node_name}/motors/{name}/safe_vel` | `std_msgs/Float64` | PV mode: set velocity (mm/s) with soft limit protection |
 
 #### `processed_state` topic
 
@@ -86,18 +85,6 @@ Publishes an absolute height in mm. Rejects values outside `[bottom_height_mm, t
 
 ```bash
 ros2 topic pub --once /ezmotion/motors/MotorA/go_to std_msgs/msg/Float64 "{data: 300.0}"
-```
-
-#### `safe_vel` topic
-
-Sets continuous velocity in mm/s. **Silently ignored** if:
-- `current_height >= top_height_mm` and velocity > 0 (at max, trying to go up)
-- `current_height <= bottom_height_mm` and velocity < 0 (at min, trying to go down)
-
-Requires PV mode.
-
-```bash
-ros2 topic pub /ezmotion/motors/MotorA/safe_vel std_msgs/msg/Float64 "{data: 50.0}"
 ```
 
 ### Services
@@ -150,8 +137,8 @@ ros2 topic pub /ezmotion/motors/MotorA/safe_vel std_msgs/msg/Float64 "{data: 50.
 | `profile_acceleration` | no | Written to 6083h at startup (rad/s²) |
 | `profile_deceleration` | no | Written to 6084h at startup (rad/s²) |
 | `max_torque` | no | Written to 6072h at startup (N·m) |
-| `top_height_mm` | no | Maximum height for `go_to`/`safe_vel` (mm, default `600.0`) |
-| `bottom_height_mm` | no | Minimum height for `go_to`/`safe_vel` (mm, default `50.0`) |
+| `top_height_mm` | no | Maximum height for `go_to` (mm, default `600.0`) |
+| `bottom_height_mm` | no | Minimum height for `go_to` (mm, default `50.0`) |
 | `homing_height_mm` | no | Physical height at motor position 0 after homing (mm, default = `top_height_mm`) |
 | `homing_method` | no | DS402 6098h, default `-3` (torque hard-stop upward) |
 | `homing_max_torque_permil` | no | Written to 2070h sub1, default `1000` (100% rated) |
@@ -208,7 +195,7 @@ ros2 action send_goal /ezmotion/homing custom_interfaces/action/EZMotionHoming \
 
 ## Linear actuator unit conversion
 
-`go_to`, `safe_vel`, and `processed_state` use mm and mm/s. The mechanical coupling constant (from ref.py) is:
+`go_to` and `processed_state` use mm and mm/s. The mechanical coupling constant (from ref.py) is:
 
 ```
 2.54 motor rotations per 1 cm of height

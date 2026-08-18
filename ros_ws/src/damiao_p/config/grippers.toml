@@ -19,7 +19,7 @@ rx_timeout                  = 0.05
 update_rate_hz              = 50.0
 # optional – default control mode for all motors unless overridden per-motor
 #            MIT | POSITION_VELOCITY | VELOCITY | FORCE_POSITION_HYBRID
-operation_mode              = "POSITION_VELOCITY"
+operation_mode              = "FORCE_POSITION_HYBRID"
 
 [AgL]
 # required
@@ -35,6 +35,8 @@ channel           = "can6"
 # optional – software joint limits (rad); commands outside range are rejected
 joint_limit_min     = 0.02
 joint_limit_max     =  5.05
+# optional – default current cap for force_position_hybrid mode (0.0–1.0 fraction of Imax)
+current_per_unit    = 0.25
 # optional – subtracted from raw motor position to give user-frame position (rad)
 #motor_homing_pos    =  0.0
 # optional – velocity command clamp (rad/s); no clamp if absent
@@ -66,3 +68,4 @@ channel = "can4"
 joint_limit_min     = 0.02
 joint_limit_max     = 5.05
 max_vel             = 30.0
+current_per_unit    = 0.25

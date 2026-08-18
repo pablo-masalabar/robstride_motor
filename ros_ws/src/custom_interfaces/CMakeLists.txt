@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/VelocityCommand.msg"
   "msg/CurrentCommand.msg"
   "msg/PositionCSPCommand.msg"
+  "msg/ForcePositionHybridCommand.msg"
   # Services
   "srv/EnableMotor.srv"
   "srv/SetRunMode.srv"

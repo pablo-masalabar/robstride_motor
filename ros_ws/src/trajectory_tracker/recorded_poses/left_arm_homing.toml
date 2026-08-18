@@ -1,14 +1,14 @@
 # homing configuration
 
 [homing_pos]
-SpL = -0.088519
-SrL = -0.023346
-SwL = 0.033749
-EpL = 0.038308
-WwL = 0.012279
-WpL = 0.014362
-WrL = 0.037416
-AgL = 0.295071
+SpL = -0.078545
+SrL = -0.024113
+SwL = 0.006129
+EpL = 0.075519
+WwL = 0.005367
+WpL = 0.053490
+WrL = -0.010536
+AgL = 2.639239
 
 [robstride_pp_defaults]
 speed        = 15.0

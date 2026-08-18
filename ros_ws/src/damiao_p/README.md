@@ -234,7 +234,7 @@ print(fb.position, fb.velocity, fb.torque)
 | `~/motors/{name}/cmd_mit` | `custom_interfaces/OperationCommand` | MIT mode command |
 | `~/motors/{name}/cmd_position_pv` | `custom_interfaces/PositionPPCommand` | Position-Velocity command |
 | `~/motors/{name}/cmd_velocity` | `custom_interfaces/VelocityCommand` | Velocity command |
-| `~/motors/{name}/cmd_force_position` | `custom_interfaces/PositionCSPCommand` | Force-Position Hybrid command |
+| `~/motors/{name}/cmd_force_position` | `custom_interfaces/ForcePositionHybridCommand` | Force-Position Hybrid command |
 
 `~/joint_states` publishes at a fixed timer rate. `~/motors/{name}/state` publishes at the command rate (every time a command is sent and the motor replies).
 

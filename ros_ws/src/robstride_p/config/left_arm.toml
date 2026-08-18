@@ -10,7 +10,7 @@ bitrate                 = 1000000      # CAN baud rate in bps
 rx_timeout              = 0.05         # reply wait time in seconds
 active_report_interval_ms = 10         # motor autonomous push interval (minimum 10 ms)
 update_rate_hz            = 30.0      # feedback publish rate (Hz)
-operation_mode            = "OPERATION"
+operation_mode            = "POSITION_PP"
 
 [SpL]
 type = "RS04"
@@ -20,9 +20,9 @@ joint_limit_max = 2.62103
 motor_homing_pos = 0.0047
 max_torque = 120.0
 max_current = 90.0
-#loc_kp = 10.0
-kp = 200.0
-kd = 8.0
+loc_kp = 10.0
+kp = 8.0
+kd = 1.0
 [SrL]
 type = "RS04"
 motor_id = 33
@@ -31,9 +31,9 @@ joint_limit_max = 3.4371
 motor_homing_pos = 0.0174
 max_torque = 120.0
 max_current = 90.0
-#loc_kp = 10.0 
-kp = 200.0
-kd = 8.0
+loc_kp = 10.0 
+kp = 8.0
+kd = 1.0
 [SwL]
 type = "RS03"
 motor_id = 34
@@ -42,8 +42,8 @@ joint_limit_max = 2.2018
 motor_homing_pos = -0.01476
 max_torque = 60.0
 max_current = 43.0 
-kp = 200.0
-kd = 8.0
+kp = 8.0
+kd = 1.0
 [EpL]
 type = "RS03"
 motor_id = 35
@@ -52,8 +52,8 @@ joint_limit_max = 0.9113
 motor_homing_pos = -0.0385
 max_torque = 60.0
 max_current = 43.0 
-kp = 100.0
-kd = 8.0
+kp = 15.0
+kd = 1.0
 [WwL]
 type = "RS02"
 motor_id = 36
@@ -62,8 +62,8 @@ joint_limit_max = 2.8016
 motor_homing_pos = 0.01208
 max_torque = 17.0
 max_current = 23.0 
-kp = 100.0
-kd = 5.0
+kp = 15.0
+kd = 1.0
 [WpL]
 type = "RS02"
 motor_id = 37
@@ -72,8 +72,8 @@ joint_limit_max = 1.7723
 motor_homing_pos = -0.03144
 max_torque = 17.0
 max_current = 23.0 
-kp = 100.0
-kd = 5.0
+kp = 15.0
+kd = 1.0
 [WrL]
 type = "RS02"
 motor_id = 38
@@ -82,5 +82,5 @@ joint_limit_max = 1.75
 motor_homing_pos = 0.0184
 max_torque = 17.0
 max_current = 23.0 
-kp = 100.0
-kd = 5.0
+kp = 15.0
+kd = 1.0

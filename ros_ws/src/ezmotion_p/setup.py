@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'ezmotion_node = ezmotion_p.motor_node:main',
+            'test_torso    = ezmotion_p.test_torso:main',
         ],
     },
 )

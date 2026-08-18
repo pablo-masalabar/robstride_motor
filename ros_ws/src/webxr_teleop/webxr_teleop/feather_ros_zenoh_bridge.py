@@ -14,11 +14,10 @@ import tomllib
 from pathlib import Path
 from typing import Dict, Optional
 
-import numpy as np
-import pinocchio as pin
 import zenoh
 from feather import feather_pb2
 from feather.hw_joints_to_sim_joint_mapping import HW_TO_SIM, SIM_TO_HW
+from feather.transport import localhost_config
 
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
@@ -26,7 +25,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
-from custom_interfaces.msg import MotorState, OperationCommand, PositionCSPCommand, PositionPPCommand, VelocityCommand
+from custom_interfaces.msg import ForcePositionHybridCommand, MotorState, OperationCommand, PositionCSPCommand, PositionPPCommand, VelocityCommand
 from std_msgs.msg import Float64
 from std_srvs.srv import SetBool
 from custom_interfaces.srv import EnableMotor, EnableMotors, Freeze, SetActiveReport, SetRunMode
@@ -65,14 +64,20 @@ _GRIPPER_URDF_LIMIT_M = 0.0475
 _NECK_PITCH_ZENOH_LOW  = -0.52   # rad
 _NECK_PITCH_ZENOH_HIGH =  1.57   # rad
 
+# Motors whose sign convention is inverted relative to zenoh/URDF.
+# Commands are negated before being sent; feedback positions and velocities
+# are negated before being published to zenoh.
+_NEGATED_MOTORS: frozenset = frozenset({'WrL', 'WrR'})
+
 
 _CMD_TOPIC_MSG_TYPE = {
-    'cmd_operation':    OperationCommand,
-    'cmd_position_pp':  PositionPPCommand,
-    'cmd_position_csp': PositionCSPCommand,
-    'cmd_position_pv':  PositionPPCommand,
-    'cmd_velocity':     VelocityCommand,
-    'go_to':            Float64,
+    'cmd_operation':      OperationCommand,
+    'cmd_position_pp':    PositionPPCommand,
+    'cmd_position_csp':   PositionCSPCommand,
+    'cmd_position_pv':    PositionPPCommand,
+    'cmd_velocity':       VelocityCommand,
+    'cmd_force_position': ForcePositionHybridCommand,
+    'go_to':              Float64,
 }
 
 _DEFAULT_CONFIG = Path(__file__).parent / 'config.toml'
@@ -132,29 +137,12 @@ class WebXRTeleopNode(Node):
             'kd': float(op_sec.get('kd', 0.0)),
         }
 
-        self._use_jd:    bool = bool(cfg.get('use_jd', False))
-        self._ik_ready:  bool = False
-        self._robstride_motors: list = list(cfg.get('arm_motors', []))
-        if self._use_jd:
-            _cfg_dir = os.path.dirname(os.path.abspath(config_path))
-            def _resolve_urdf(p: str) -> str:
-                return p if os.path.isabs(p) else os.path.join(_cfg_dir, p)
-            self._left_arm_urdf_path:  str = _resolve_urdf(cfg.get('left_arm_urdf_path',  ''))
-            self._right_arm_urdf_path: str = _resolve_urdf(cfg.get('right_arm_urdf_path', ''))
-            self._left_ee_frame:       str = cfg.get('left_ee_frame',  'arm_to_gripperL')
-            self._right_ee_frame:      str = cfg.get('right_ee_frame', 'arm_to_gripperR')
-            try:
-                self._init_jd()
-                self._ik_ready = True
-                self.get_logger().info('Pinocchio models loaded — gravity compensation enabled')
-            except Exception as e:
-                self.get_logger().error(f'Failed to load pinocchio models: {e}')
         self._robstride_pp_defaults = self._require_section(cfg, 'robstride_pp_defaults',
             ['speed', 'acceleration', 'deceleration', 'torque_limit'])
         self._ezmotion_pp_defaults = self._require_section(cfg, 'ezmotion_pp_defaults',
             ['speed', 'acceleration', 'deceleration'])
-        self._damiao_pv_defaults = self._require_section(cfg, 'damiao_pv_defaults',
-            ['speed'])
+        self._damiao_force_position_defaults = self._require_section(cfg, 'damiao_force_position_defaults',
+            ['velocity', 'current_per_unit'])
 
         grippers_cfg = cfg.get('grippers', {})
         for field in ('gripper_open_val', 'gripper_closed_val'):
@@ -192,7 +180,8 @@ class WebXRTeleopNode(Node):
             for motor_name, motor in node['motors'].items()
         }
 
-        self._last_go_to: Dict[str, float] = {}
+        self._last_go_to:     Dict[str, float] = {}
+        self._go_to_deadband: float             = float(cfg.get('go_to_deadband_mm', 1.0))
 
         self._feedback_subs: Dict[str, object] = {}
         self._cmd_pubs:      Dict[str, object] = {}
@@ -283,7 +272,7 @@ class WebXRTeleopNode(Node):
             self.get_logger().info(f'Arm poses configured: {list(self._arm_poses.keys())}')
 
         self._joints_state_publish_hz: float = self._resolve_publish_hz(cfg)
-        self._zenoh_session = self._open_zenoh_session(cfg.get('zenoh_config'))
+        self._zenoh_session = zenoh.open(localhost_config())
 
         self._group_motors:     Dict[str, list]            = {}
         self._group_motor_cmd:  Dict[str, Dict[str, str]]  = {}
@@ -318,10 +307,11 @@ class WebXRTeleopNode(Node):
 
             cmd_key = cfg.get(f'{group_name}_cmd_zenoh_key')
             if cmd_key:
-                sub = self._zenoh_session.declare_subscriber(
-                    cmd_key,
-                    lambda sample, g=group_name: self._on_zenoh_cmd(sample, g),
-                )
+                if 'arm' in group_name:
+                    cb = lambda sample, g=group_name: self._on_zenoh_arm_cmd(sample, g)
+                else:
+                    cb = lambda sample, g=group_name: self._on_zenoh_cmd(sample, g)
+                sub = self._zenoh_session.declare_subscriber(cmd_key, cb)
                 self._zenoh_cmd_subs[group_name] = sub
                 self.get_logger().info(f'Zenoh cmd sub [{group_name}]: {cmd_key}')
 
@@ -695,8 +685,8 @@ class WebXRTeleopNode(Node):
             res.message = f'Unknown pose: "{name}". Available: {list(self._arm_poses.keys())}'
             return res
 
-        pose_positions    = pose['positions']
-        pose_cmd_defaults = pose['cmd_defaults'] or None
+        pose_positions  = pose['positions']
+        pose_overrides  = pose['cmd_defaults']   # pose-level overrides merged on top of per-motor defaults
 
         sent: list = []
         skipped: list = []
@@ -706,7 +696,8 @@ class WebXRTeleopNode(Node):
                 skipped.append(motor_name)
                 self.get_logger().warning(f'[set_arm_pose/{name}] {motor_name}: no cmd publisher — skipped')
                 continue
-            self._publish_motor_cmd(motor_name, cmd_topic, position, cmd_defaults=pose_cmd_defaults)
+            d = {**self._motor_cmd_defaults.get(motor_name, {}), **pose_overrides}
+            self._publish_motor_cmd(motor_name, cmd_topic, position, cmd_defaults=d or None)
             self.get_logger().info(f'[set_arm_pose/{name}] {motor_name} → {position:.4f}')
             sent.append(motor_name)
 
@@ -729,6 +720,7 @@ class WebXRTeleopNode(Node):
                     continue
                 joint          = array.joints.add()
                 joint.id       = HW_TO_SIM.get(motor_name, motor_name)
+                sign = -1.0 if motor_name in _NEGATED_MOTORS else 1.0
                 if motor_name in ('AgL', 'AgR'):
                     norm           = self._gripper_to_zenoh(float(state.position))
                     joint.position = norm * _GRIPPER_URDF_LIMIT_M
@@ -737,9 +729,9 @@ class WebXRTeleopNode(Node):
                 elif is_torso:
                     joint.position = (float(state.position) - self._torso_home_mm) / 1000.0
                 else:
-                    joint.position = float(state.position)
-                joint.velocity = float(state.velocity)
-                joint.torque   = float(state.torque)
+                    joint.position = sign * float(state.position)
+                joint.velocity = sign * float(state.velocity)
+                joint.torque   = sign * float(state.torque)
 
             if array.joints:
                 pub.put(array.SerializeToString())
@@ -788,16 +780,6 @@ class WebXRTeleopNode(Node):
 
         is_torso = self._group_is_torso[group_name]
 
-        # Gravity compensation — only for arm groups when use_jd is enabled
-        gravity_torques: Dict[str, float] = {}
-        if self._use_jd and self._ik_ready and not is_torso and not self._group_is_gripper[group_name]:
-            sfx = 'L' if 'left' in group_name else ('R' if 'right' in group_name else None)
-            if sfx is not None:
-                try:
-                    gravity_torques = self._compute_arm_gravity_from_positions(positions_by_id, sfx)
-                except Exception as e:
-                    self.get_logger().error(f'[{group_name}] gravity compensation failed: {e}')
-
         for motor_name in self._group_motors[group_name]:
             if self._is_frozen(motor_name):
                 continue
@@ -817,8 +799,47 @@ class WebXRTeleopNode(Node):
                     value = self._neck_pitch_zenoh_to_hw(value)
                 elif is_torso:
                     value = self._torso_home_mm + value * 1000.0
+                self._publish_motor_cmd(motor_name, cmd_topic, value)
+
+    def _on_zenoh_arm_cmd(self, sample, group_name: str) -> None:
+        array = feather_pb2.ArmJointControlArray()
+        try:
+            array.ParseFromString(sample.payload.to_bytes())
+        except Exception as e:
+            self.get_logger().error(f'[{group_name}] bad ArmJointControlArray: {e}')
+            return
+
+        positions_by_id: Dict[str, float] = {
+            SIM_TO_HW.get(j.id, j.id): float(j.position)
+            for j in array.joints
+        }
+        torques_by_id: Dict[str, float] = {
+            SIM_TO_HW.get(j.id, j.id): float(j.feedforward_torque)
+            for j in array.joints
+        }
+
+        if self._debug:
+            joints_str = ', '.join(f'{k}={v:.4f}' for k, v in positions_by_id.items())
+            self.get_logger().info(f'[DEBUG] arm cmd [{group_name}]: pos={joints_str}')
+
+        if not self._forwarding_enabled:
+            return
+
+        for motor_name in self._group_motors[group_name]:
+            if self._is_frozen(motor_name):
+                continue
+
+            cmd_topic = self._group_motor_cmd[group_name].get(motor_name)
+            if not cmd_topic or cmd_topic not in self._cmd_pubs:
+                continue
+
+            if motor_name in positions_by_id:
+                value = positions_by_id[motor_name]
+                if motor_name in ('AgL', 'AgR'):
+                    norm  = max(0.0, min(1.0, value / _GRIPPER_URDF_LIMIT_M))
+                    value = self._zenoh_to_gripper(norm)
                 self._publish_motor_cmd(motor_name, cmd_topic, value,
-                                        torque_ff=gravity_torques.get(motor_name))
+                                        torque_ff=torques_by_id.get(motor_name))
 
     def _publish_motor_cmd(self, motor_name: str, cmd_topic: str, value: float,
                            cmd_defaults: Optional[dict] = None,
@@ -829,7 +850,7 @@ class WebXRTeleopNode(Node):
             cmd           = OperationCommand()
             cmd.name      = motor_name
             cmd.position  = value
-            cmd.velocity  = 0.0
+            cmd.velocity  = d.get('velocity', 0.0)
             cmd.torque_ff = torque_ff if torque_ff is not None else 0.0
             cmd.kp        = d.get('kp',        self._robstride_operation_defaults['kp'])
             cmd.kd        = d.get('kd',        self._robstride_operation_defaults['kd'])
@@ -840,7 +861,8 @@ class WebXRTeleopNode(Node):
             cmd.acceleration  = d.get('acceleration',  20.0)
             cmd.current_limit = d.get('current_limit', 23.0)
         elif cmd_topic.endswith('go_to'):
-            if self._last_go_to.get(cmd_topic) == value:
+            last = self._last_go_to.get(cmd_topic)
+            if last is not None and abs(value - last) < self._go_to_deadband:
                 return
             self._last_go_to[cmd_topic] = value
             cmd      = Float64()
@@ -851,11 +873,12 @@ class WebXRTeleopNode(Node):
             cmd.position      = value
             cmd.speed_limit   = d.get('speed',         self._robstride_pp_defaults['speed'])
             cmd.current_limit = d.get('current_limit', 0.0)
-        elif cmd_topic.endswith('cmd_position_pv'):
-            cmd          = PositionPPCommand()
-            cmd.name     = motor_name
-            cmd.position = value
-            cmd.speed    = d.get('speed', self._damiao_pv_defaults['speed'])
+        elif cmd_topic.endswith('cmd_force_position'):
+            cmd                  = ForcePositionHybridCommand()
+            cmd.name             = motor_name
+            cmd.position         = value
+            cmd.velocity         = d.get('velocity',         self._damiao_force_position_defaults['velocity'])
+            cmd.current_per_unit = d.get('current_per_unit', self._damiao_force_position_defaults['current_per_unit'])
         else:
             cmd              = PositionPPCommand()
             cmd.name         = motor_name
@@ -873,68 +896,6 @@ class WebXRTeleopNode(Node):
 
     def _on_motor_state(self, motor_name: str, msg: MotorState) -> None:
         self._latest_states[motor_name] = msg
-
-    # ── IK ───────────────────────────────────────────────────────────────
-    def _init_jd(self):
-        self.left_arm_pin_model  = pin.buildModelFromUrdf(self._left_arm_urdf_path)
-        self.right_arm_pin_model = pin.buildModelFromUrdf(self._right_arm_urdf_path)
-
-        self.left_arm_pin_data  = self.left_arm_pin_model.createData()
-        self.right_arm_pin_data = self.right_arm_pin_model.createData()
-
-        self.left_ee_id  = self.left_arm_pin_model.getFrameId(self._left_ee_frame)
-        self.right_ee_id = self.right_arm_pin_model.getFrameId(self._right_ee_frame)
-
-        self.left_arm_pin_q  = pin.neutral(self.left_arm_pin_model)
-        self.right_arm_pin_q = pin.neutral(self.right_arm_pin_model)
-
-        self._left_arm_joint_map  = self._build_joint_map(self.left_arm_pin_model,  'L')
-        self._right_arm_joint_map = self._build_joint_map(self.right_arm_pin_model, 'R')
-
-    def _build_joint_map(self, model, sfx: str) -> Dict[str, int]:
-        """Return {base_motor_name: pinocchio_joint_id} for one arm."""
-        result: Dict[str, int] = {}
-        for base in self._robstride_motors:
-            joint_name = base + sfx
-            jid = model.getJointId(joint_name)
-            if jid < len(model.joints):
-                result[base] = jid
-            else:
-                self.get_logger().warning(f'Joint {joint_name!r} not found in {sfx} arm model (motor {joint_name})')
-        return result
-        
-    def _compute_joint_dynamics(self, model, data, q):
-        return pin.computeGeneralizedGravity(model, data, q)
-
-    def _build_arm_q_v(self, state_dict: dict, motor_sfx: str, model, joint_map: Dict[str, int]):
-        """Build pinocchio q and v arrays from a motor state dict for one arm."""
-        q = pin.neutral(model)
-        v = np.zeros(model.nv)
-        for base in self._robstride_motors:
-            jid = joint_map.get(base)
-            if jid is None:
-                continue
-            ms = state_dict.get(base + motor_sfx)
-            if ms is None:
-                continue
-            q[model.joints[jid].idx_q] = ms.position
-            v[model.joints[jid].idx_v] = ms.velocity
-        return q, v
-
-    def _compute_arm_gravity_from_positions(self, positions_by_motor: Dict[str, float],
-                                            sfx: str) -> Dict[str, float]:
-        """Return {motor_name: gravity_torque} for one arm given position dict."""
-        model = self.left_arm_pin_model  if sfx == 'L' else self.right_arm_pin_model
-        data  = self.left_arm_pin_data   if sfx == 'L' else self.right_arm_pin_data
-        jmap  = self._left_arm_joint_map if sfx == 'L' else self._right_arm_joint_map
-        q = pin.neutral(model)
-        for base, jid in jmap.items():
-            pos = positions_by_motor.get(base + sfx)
-            if pos is not None:
-                q[model.joints[jid].idx_q] = pos
-        tau = self._compute_joint_dynamics(model, data, q)
-        return {base + sfx: float(tau[model.joints[jid].idx_v]) for base, jid in jmap.items()}
-
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 

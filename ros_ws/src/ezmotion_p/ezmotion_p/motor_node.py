@@ -188,7 +188,6 @@ class MotorNode(Node):
             (PositionCSPCommand, 'cmd_position_csp', self._on_cmd_position_csp),
             (VelocityCommand,    'cmd_velocity',     self._on_cmd_velocity),
             (Float64,            'go_to',            self._on_go_to),
-            (Float64,            'safe_vel',         self._on_safe_vel),
         ]
         for name in self._motors:
             for msg_type, suffix, cb in _mode_subs:
@@ -325,7 +324,7 @@ class MotorNode(Node):
                     'profile_deceleration': cfg.get('profile_deceleration'),
                     # Mode to restore after homing (resolved below)
                     'configured_mode': None,
-                    # Linear actuator height limits (mm) for go_to / safe_vel
+                    # Linear actuator height limits (mm) for go_to
                     'top_height_mm':    cfg.get('top_height_mm',    600.0),
                     'bottom_height_mm': cfg.get('bottom_height_mm',  50.0),
                     # Physical height (mm) at the homing position (motor pos = 0).
@@ -513,13 +512,13 @@ class MotorNode(Node):
         homing_height = self._motor_cfg[name]['homing_height_mm']
         return homing_height + (_HEIGHT_DIR * pos_rad / _RAD_PER_MM)
 
-    # ── go_to / safe_vel subscribers ──────────────────────────────────────────
+    # ── go_to subscriber ──────────────────────────────────────────────────────
 
     def _on_go_to(self, msg: Float64, name: str) -> None:
-        """PP mode: move to absolute height in mm from bottom."""
-        height_mm  = msg.data
-        top        = self._motor_cfg[name]['top_height_mm']
-        bottom     = self._motor_cfg[name]['bottom_height_mm']
+        """PP or CSP mode: move to absolute height in mm from bottom."""
+        height_mm = msg.data
+        top       = self._motor_cfg[name]['top_height_mm']
+        bottom    = self._motor_cfg[name]['bottom_height_mm']
 
         if height_mm > top:
             self.get_logger().error(
@@ -532,48 +531,27 @@ class MotorNode(Node):
             )
             return
 
-        if not self._check_mode(name, OperationMode.PP):
+        mode = self._motor_mode.get(name)
+        if mode not in (OperationMode.PP, OperationMode.CSP):
+            self.get_logger().error(
+                f'[{name}] go_to requires PP or CSP mode, '
+                f'currently {mode.name if mode else "None"}'
+            )
+            return
+        if not self._motor_enabled.get(name, False):
+            self.get_logger().warning(f'[{name}] Motor not enabled — command dropped')
             return
 
         motor_pos = self._height_to_motor_rad(name, height_mm)
         with self._motor_locks[name]:
             try:
                 motor = self._motors[name]
-                motor.trigger_move_pp(motor_pos)
+                if mode == OperationMode.CSP:
+                    motor.set_cyclic_position(motor_pos)
+                else:
+                    motor.trigger_move_pp(motor_pos)
             except Exception as e:
                 self.get_logger().error(f'[{name}] go_to error: {e}')
-
-    def _on_safe_vel(self, msg: Float64, name: str) -> None:
-        """PP mode: set velocity (rad/s) toward the appropriate height limit as target."""
-        vel_rad_s = msg.data
-        top       = self._motor_cfg[name]['top_height_mm']
-        bottom    = self._motor_cfg[name]['bottom_height_mm']
-
-        if not self._check_mode(name, OperationMode.PP):
-            return
-
-        with self._motor_locks[name]:
-            try:
-                motor = self._motors[name]
-                if vel_rad_s == 0.0:
-                    profile_vel = self._motor_cfg[name].get('profile_velocity')
-                    if profile_vel is not None:
-                        motor.set_profile_velocity(float(profile_vel))
-                    motor.trigger_move_pp(motor.feedback.position)
-                    return
-                motor.set_profile_velocity(abs(vel_rad_s))
-                if vel_rad_s > 0:
-                    current_height = self._motor_rad_to_height(name, motor.feedback.position)
-                    if current_height >= top:
-                        return
-                    motor.trigger_move_pp(self._height_to_motor_rad(name, top))
-                else:
-                    current_height = self._motor_rad_to_height(name, motor.feedback.position)
-                    if current_height <= bottom:
-                        return
-                    motor.trigger_move_pp(self._height_to_motor_rad(name, bottom))
-            except Exception as e:
-                self.get_logger().error(f'[{name}] safe_vel error: {e}')
 
     # ── Command subscribers ────────────────────────────────────────────────────
 
